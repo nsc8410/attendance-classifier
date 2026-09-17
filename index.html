@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>출석 명단 자동 분류</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #ffffff; --text: #1a1a1a; --sub: #6b7280;
+    --border: #e2e4e8; --accent: #305496; --accent-text: #ffffff;
+    --ok: #1a7f37; --err: #c62828; --warn-bg: #fff8e1; --table-head: #305496;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16171a; --card: #232427; --text: #eaeaea; --sub: #9aa0a6;
+      --border: #3a3b3e; --accent: #6f93d1; --accent-text: #0f1115;
+      --ok: #4cc06a; --err: #ff6b6b; --warn-bg: #33301a; --table-head: #26385c;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16171a; --card: #232427; --text: #eaeaea; --sub: #9aa0a6;
+    --border: #3a3b3e; --accent: #6f93d1; --accent-text: #0f1115;
+    --ok: #4cc06a; --err: #ff6b6b; --warn-bg: #33301a; --table-head: #26385c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, 'Malgun Gothic', sans-serif;
+    padding: 20px 16px 60px;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  .sub { color: var(--sub); font-size: 13px; margin-bottom: 22px; }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 18px; margin-bottom: 18px;
+  }
+  .card h2 { font-size: 15px; margin: 0 0 12px; }
+  .card h2 .num {
+    display: inline-flex; width: 22px; height: 22px; border-radius: 50%;
+    background: var(--accent); color: var(--accent-text); align-items: center;
+    justify-content: center; font-size: 12px; margin-right: 8px;
+  }
+  .status { font-size: 13px; margin-top: 8px; }
+  .status.ok { color: var(--ok); }
+  .status.err { color: var(--err); }
+  input[type=file] { width: 100%; font-size: 14px; }
+  .file-row {
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+    padding: 10px 0; border-bottom: 1px solid var(--border);
+  }
+  .file-row:last-child { border-bottom: none; }
+  .file-row .fname { flex: 1 1 160px; font-size: 13px; word-break: break-all; }
+  .file-row input[type=date], .file-row select {
+    padding: 8px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--card); color: var(--text); font-size: 13px;
+  }
+  .file-row button.remove {
+    background: none; border: none; color: var(--err); cursor: pointer; font-size: 13px;
+  }
+  button.primary {
+    width: 100%; padding: 13px; font-size: 15px; font-weight: 700;
+    border: none; border-radius: 10px; background: var(--accent); color: var(--accent-text);
+    cursor: pointer; margin-top: 10px;
+  }
+  button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+  .result-block { margin-top: 14px; }
+  .result-title { font-size: 14px; font-weight: 700; margin-bottom: 6px; }
+  .result-meta { font-size: 12px; color: var(--sub); margin-bottom: 8px; }
+  .scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; white-space: nowrap; }
+  th, td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: left; }
+  th { background: var(--table-head); color: #fff; position: sticky; top: 0; }
+  .unmatched-box {
+    background: var(--warn-bg); border-radius: 8px; padding: 10px 12px; font-size: 12px; margin-top: 8px;
+  }
+  .hidden { display: none; }
+  .footer-btns { display: flex; gap: 10px; margin-top: 16px; }
+  .footer-btns button.primary { margin-top: 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>📋 출석 명단 자동 분류</h1>
+  <div class="sub">엑셀 업로드만으로 사번을 명단과 대조해 성명·전화번호를 자동으로 붙여줍니다. 모든 처리는 이 브라우저 안에서만 이뤄지고, 어떤 데이터도 서버로 전송되지 않습니다.</div>
+
+  <div class="card">
+    <h2><span class="num">1</span>조합원명단 업로드</h2>
+    <div class="sub" style="margin-bottom:10px;">사번·성명·전화번호가 들어있는 전체 조합원 명단 파일 (.xls, .xlsx)</div>
+    <input type="file" id="memberFile" accept=".xls,.xlsx" />
+    <div class="status" id="memberStatus"></div>
+  </div>
+
+  <div class="card">
+    <h2><span class="num">2</span>출석 파일 업로드 (여러 개 가능)</h2>
+    <div class="sub" style="margin-bottom:10px;">사번이 들어있는 출석 파일들. 각 파일에 날짜·시간대를 지정하세요.</div>
+    <input type="file" id="attFiles" accept=".xls,.xlsx" multiple />
+    <div id="fileList" style="margin-top:10px;"></div>
+  </div>
+
+  <button class="primary" id="processBtn" disabled>분류 시작</button>
+
+  <div id="results"></div>
+
+  <div class="footer-btns hidden" id="downloadRow">
+    <button class="primary" id="downloadBtn">📥 결과 엑셀로 다운로드</button>
+  </div>
+</div>
+
+<script>
+let memberList = []; // [{사번,성명,전화번호,부서1,부서2,부서3,부서4,직급,성별,재직여부}]
+let memberMap = new Map();
+let pendingFiles = []; // {id, file, name}
+let processedResults = []; // {label, date, timeslot, matched:[], unmatched:[]}
+
+const norm = (v) => String(v == null ? '' : v).trim().toUpperCase();
+
+function findHeaderRow(rows) {
+  for (let i = 0; i < Math.min(rows.length, 5); i++) {
+    if (rows[i].some(c => String(c).trim() === '사번')) return i;
+  }
+  return -1;
+}
+
+document.getElementById('memberFile').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  const statusEl = document.getElementById('memberStatus');
+  if (!file) return;
+  try {
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
+    const hIdx = findHeaderRow(rows);
+    if (hIdx === -1) throw new Error('사번 컬럼을 찾을 수 없습니다.');
+    const headers = rows[hIdx].map(h => String(h).trim());
+    const col = (name) => headers.indexOf(name);
+    const idxId = col('사번'), idxName = col('성명'), idxPhone = col('전화번호');
+    const idxD1 = col('부서1'), idxD2 = col('부서2'), idxD3 = col('부서3'), idxD4 = col('부서4');
+    const idxJik = col('직급'), idxSex = col('성별'), idxJae = col('재직여부');
+    memberList = [];
+    memberMap = new Map();
+    for (let i = hIdx + 1; i < rows.length; i++) {
+      const r = rows[i];
+      if (!r || r.every(c => String(c).trim() === '')) continue;
+      const id = String(r[idxId] ?? '').trim();
+      if (!id) continue;
+      const rec = {
+        사번: id,
+        성명: idxName >= 0 ? r[idxName] : '',
+        전화번호: idxPhone >= 0 ? r[idxPhone] : '',
+        부서1: idxD1 >= 0 ? r[idxD1] : '',
+        부서2: idxD2 >= 0 ? r[idxD2] : '',
+        부서3: idxD3 >= 0 ? r[idxD3] : '',
+        부서4: idxD4 >= 0 ? r[idxD4] : '',
+        직급: idxJik >= 0 ? r[idxJik] : '',
+        성별: idxSex >= 0 ? r[idxSex] : '',
+        재직여부: idxJae >= 0 ? r[idxJae] : ''
+      };
+      memberList.push(rec);
+      memberMap.set(norm(id), rec);
+    }
+    statusEl.textContent = `✅ ${memberList.length.toLocaleString()}명 로드 완료`;
+    statusEl.className = 'status ok';
+  } catch (err) {
+    statusEl.textContent = '❌ 파일을 읽는 중 오류: ' + err.message;
+    statusEl.className = 'status err';
+    memberList = []; memberMap = new Map();
+  }
+  updateProcessBtn();
+});
+
+let fileIdSeq = 0;
+document.getElementById('attFiles').addEventListener('change', (e) => {
+  const files = Array.from(e.target.files);
+  const today = new Date().toISOString().slice(0, 10);
+  for (const file of files) {
+    pendingFiles.push({ id: ++fileIdSeq, file, date: today, timeslot: '오전' });
+  }
+  renderFileList();
+  updateProcessBtn();
+  e.target.value = '';
+});
+
+function renderFileList() {
+  const el = document.getElementById('fileList');
+  el.innerHTML = '';
+  pendingFiles.forEach(pf => {
+    const row = document.createElement('div');
+    row.className = 'file-row';
+    row.innerHTML = `
+      <span class="fname">${pf.file.name}</span>
+      <input type="date" value="${pf.date}" data-id="${pf.id}" class="dateInput" />
+      <select data-id="${pf.id}" class="slotInput">
+        <option value="오전" ${pf.timeslot === '오전' ? 'selected' : ''}>오전</option>
+        <option value="오후" ${pf.timeslot === '오후' ? 'selected' : ''}>오후</option>
+      </select>
+      <button class="remove" data-id="${pf.id}">삭제</button>
+    `;
+    el.appendChild(row);
+  });
+  el.querySelectorAll('.dateInput').forEach(inp => inp.addEventListener('change', (e) => {
+    const pf = pendingFiles.find(p => p.id == e.target.dataset.id);
+    if (pf) pf.date = e.target.value;
+  }));
+  el.querySelectorAll('.slotInput').forEach(sel => sel.addEventListener('change', (e) => {
+    const pf = pendingFiles.find(p => p.id == e.target.dataset.id);
+    if (pf) pf.timeslot = e.target.value;
+  }));
+  el.querySelectorAll('.remove').forEach(btn => btn.addEventListener('click', (e) => {
+    pendingFiles = pendingFiles.filter(p => p.id != e.target.dataset.id);
+    renderFileList();
+    updateProcessBtn();
+  }));
+}
+
+function updateProcessBtn() {
+  document.getElementById('processBtn').disabled = !(memberList.length > 0 && pendingFiles.length > 0);
+}
+
+document.getElementById('processBtn').addEventListener('click', async () => {
+  processedResults = [];
+  const resultsEl = document.getElementById('results');
+  resultsEl.innerHTML = '';
+  for (const pf of pendingFiles) {
+    const buf = await pf.file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
+    const matched = [];
+    const unmatched = [];
+    for (const r of rows) {
+      const idRaw = String(r[0] ?? '').trim();
+      if (!idRaw) continue;
+      const group = String(r[1] ?? '').trim();
+      const key = norm(idRaw);
+      const m = memberMap.get(key);
+      if (m) {
+        matched.push({ 사번: idRaw, 지단: group, ...m });
+      } else {
+        unmatched.push(idRaw);
+      }
+    }
+    const label = `${pf.date}_${pf.timeslot}`;
+    processedResults.push({ label, date: pf.date, timeslot: pf.timeslot, fileName: pf.file.name, matched, unmatched });
+  }
+  renderResults();
+  document.getElementById('downloadRow').classList.remove('hidden');
+});
+
+function renderResults() {
+  const el = document.getElementById('results');
+  el.innerHTML = '';
+  processedResults.forEach(res => {
+    const block = document.createElement('div');
+    block.className = 'card result-block';
+    let unmatchedHtml = '';
+    if (res.unmatched.length > 0) {
+      unmatchedHtml = `<div class="unmatched-box">⚠️ 명단에서 찾을 수 없는 사번 ${res.unmatched.length}건: ${res.unmatched.join(', ')}</div>`;
+    }
+    const rowsHtml = res.matched.slice(0, 50).map(m => `
+      <tr><td>${m.사번}</td><td>${m.지단 || ''}</td><td>${m.성명}</td><td>${m.전화번호}</td><td>${m.부서1}</td><td>${m.부서2}</td><td>${m.부서3}</td><td>${m.직급}</td></tr>
+    `).join('');
+    const moreNote = res.matched.length > 50 ? `<div class="result-meta">화면에는 처음 50건만 표시됩니다. 전체는 다운로드 파일에서 확인하세요.</div>` : '';
+    block.innerHTML = `
+      <div class="result-title">${res.label} <span class="result-meta">(${res.fileName})</span></div>
+      <div class="result-meta">매칭 ${res.matched.length}명 / 미매칭 ${res.unmatched.length}건</div>
+      ${unmatchedHtml}
+      <div class="scroll" style="margin-top:8px;">
+        <table>
+          <thead><tr><th>사번</th><th>지단</th><th>성명</th><th>전화번호</th><th>부서1</th><th>부서2</th><th>부서3</th><th>직급</th></tr></thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      </div>
+      ${moreNote}
+    `;
+    el.appendChild(block);
+  });
+}
+
+document.getElementById('downloadBtn').addEventListener('click', () => {
+  const wb = XLSX.utils.book_new();
+  processedResults.forEach(res => {
+    const data = res.matched.map(m => ({
+      사번: m.사번, 지단: m.지단, 성명: m.성명, 전화번호: m.전화번호,
+      부서1: m.부서1, 부서2: m.부서2, 부서3: m.부서3, 부서4: m.부서4, 직급: m.직급, 성별: m.성별, 재직여부: m.재직여부
+    }));
+    const ws = XLSX.utils.json_to_sheet(data);
+    let sheetName = res.label.replace(/[\\/?*[\]:]/g, '_').slice(0, 31);
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    if (res.unmatched.length > 0) {
+      const wsU = XLSX.utils.json_to_sheet(res.unmatched.map(id => ({ 미매칭사번: id })));
+      XLSX.utils.book_append_sheet(wb, wsU, (sheetName + '_미매칭').slice(0, 31));
+    }
+  });
+  const today = new Date().toISOString().slice(0, 10);
+  XLSX.writeFile(wb, `출석분류결과_${today}.xlsx`);
+});
+</script>
+</body>
+</html>
