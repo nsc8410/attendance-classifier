@@ -3,300 +3,855 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>출석 명단 자동 분류</title>
+<title>현대중공업지부 참석확인서 집계</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
-  :root {
-    --bg: #f5f6f8; --card: #ffffff; --text: #1a1a1a; --sub: #6b7280;
-    --border: #e2e4e8; --accent: #305496; --accent-text: #ffffff;
-    --ok: #1a7f37; --err: #c62828; --warn-bg: #fff8e1; --table-head: #305496;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --bg: #16171a; --card: #232427; --text: #eaeaea; --sub: #9aa0a6;
-      --border: #3a3b3e; --accent: #6f93d1; --accent-text: #0f1115;
-      --ok: #4cc06a; --err: #ff6b6b; --warn-bg: #33301a; --table-head: #26385c;
-    }
-  }
-  :root[data-theme="dark"] {
-    --bg: #16171a; --card: #232427; --text: #eaeaea; --sub: #9aa0a6;
-    --border: #3a3b3e; --accent: #6f93d1; --accent-text: #0f1115;
-    --ok: #4cc06a; --err: #ff6b6b; --warn-bg: #33301a; --table-head: #26385c;
-  }
   * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--bg); color: var(--text);
-    font-family: -apple-system, 'Malgun Gothic', sans-serif;
-    padding: 20px 16px 60px;
-  }
-  .wrap { max-width: 900px; margin: 0 auto; }
-  h1 { font-size: 22px; margin-bottom: 4px; }
-  .sub { color: var(--sub); font-size: 13px; margin-bottom: 22px; }
-  .card {
-    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
-    padding: 18px; margin-bottom: 18px;
-  }
-  .card h2 { font-size: 15px; margin: 0 0 12px; }
-  .card h2 .num {
-    display: inline-flex; width: 22px; height: 22px; border-radius: 50%;
-    background: var(--accent); color: var(--accent-text); align-items: center;
-    justify-content: center; font-size: 12px; margin-right: 8px;
-  }
-  .status { font-size: 13px; margin-top: 8px; }
-  .status.ok { color: var(--ok); }
-  .status.err { color: var(--err); }
-  input[type=file] { width: 100%; font-size: 14px; }
-  .file-row {
-    display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
-    padding: 10px 0; border-bottom: 1px solid var(--border);
-  }
-  .file-row:last-child { border-bottom: none; }
-  .file-row .fname { flex: 1 1 160px; font-size: 13px; word-break: break-all; }
-  .file-row input[type=date], .file-row select {
-    padding: 8px; border-radius: 6px; border: 1px solid var(--border);
-    background: var(--card); color: var(--text); font-size: 13px;
-  }
-  .file-row button.remove {
-    background: none; border: none; color: var(--err); cursor: pointer; font-size: 13px;
-  }
-  button.primary {
-    width: 100%; padding: 13px; font-size: 15px; font-weight: 700;
-    border: none; border-radius: 10px; background: var(--accent); color: var(--accent-text);
-    cursor: pointer; margin-top: 10px;
-  }
-  button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
-  .result-block { margin-top: 14px; }
-  .result-title { font-size: 14px; font-weight: 700; margin-bottom: 6px; }
-  .result-meta { font-size: 12px; color: var(--sub); margin-bottom: 8px; }
-  .scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
-  table { border-collapse: collapse; width: 100%; font-size: 12px; white-space: nowrap; }
-  th, td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: left; }
-  th { background: var(--table-head); color: #fff; position: sticky; top: 0; }
-  .unmatched-box {
-    background: var(--warn-bg); border-radius: 8px; padding: 10px 12px; font-size: 12px; margin-top: 8px;
-  }
-  .hidden { display: none; }
-  .footer-btns { display: flex; gap: 10px; margin-top: 16px; }
-  .footer-btns button.primary { margin-top: 0; }
+  body { font-family:-apple-system,'Malgun Gothic',sans-serif; margin:0; background:#eef1f6; color:#1a1a1a; }
+  .wrap { max-width:1120px; margin:0 auto; padding:22px 18px; }
+  button { border:none; border-radius:8px; padding:9px 16px; font-size:13px; cursor:pointer; }
+  button.primary { background:#2f4f8f; color:#fff; font-weight:700; }
+  button.ghost { background:#fff; border:1px solid #d5d9e0; }
+  button.danger { background:#fdeaea; color:#c62828; }
+  button.icon { padding:5px 10px; font-size:12px; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  input, select { padding:9px; border:1px solid #d5d9e0; border-radius:7px; font-size:13px; }
+  table { border-collapse:collapse; width:100%; background:#fff; font-size:13px; }
+  th, td { padding:9px 12px; border-bottom:1px solid #edf0f4; text-align:left; white-space:nowrap; }
+  th { background:#2f4f8f; color:#fff; font-weight:600; }
+  tr:hover td { background:#f7f9fc; }
+  .card { background:#fff; border-radius:12px; padding:20px; margin-bottom:16px; box-shadow:0 1px 4px rgba(0,0,0,0.05); }
+  .link { color:#2f4f8f; cursor:pointer; text-decoration:underline; }
+  .badge { display:inline-block; padding:2px 9px; border-radius:20px; font-size:11px; }
+  .badge.full { background:#e6f4ea; color:#1a7f37; }
+  .badge.part { background:#fff4e0; color:#a15c00; }
+  .badge.none { background:#f1f1f1; color:#888; }
+  .modal-bg { position:fixed; inset:0; background:rgba(0,0,0,0.4); display:flex; align-items:center; justify-content:center; z-index:50; padding:16px; }
+  .modal { background:#fff; border-radius:12px; padding:22px; width:400px; max-width:100%; max-height:90vh; overflow:auto; }
+  .modal label { font-size:12px; font-weight:700; display:block; margin:10px 0 4px; }
+  .modal input, .modal select { width:100%; }
+  .modal .actions { display:flex; gap:8px; margin-top:16px; }
+  .modal .actions button { flex:1; }
+  .empty { color:#999; text-align:center; padding:30px; }
+  .row-flex { display:flex; gap:6px; align-items:center; }
+  .summary-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin-top:14px; }
+  .summary-grid .box { background:#f7f9fc; border-radius:10px; padding:14px; }
+  .summary-grid .box b { display:block; font-size:12px; color:#888; margin-bottom:4px; font-weight:600; }
+  .summary-grid .box span { font-size:20px; font-weight:700; color:#2f4f8f; }
+  .notice { background:#fff8e8; border-radius:8px; padding:10px 14px; font-size:12.5px; color:#8a5a00; margin-top:10px; }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <h1>📋 출석 명단 자동 분류</h1>
-  <div class="sub">엑셀 업로드만으로 사번을 명단과 대조해 성명·전화번호를 자동으로 붙여줍니다. 모든 처리는 이 브라우저 안에서만 이뤄지고, 어떤 데이터도 서버로 전송되지 않습니다.</div>
 
-  <div class="card">
-    <h2><span class="num">1</span>조합원명단 업로드</h2>
-    <div class="sub" style="margin-bottom:10px;">사번·성명·전화번호가 들어있는 전체 조합원 명단 파일 (.xls, .xlsx)</div>
-    <input type="file" id="memberFile" accept=".xls,.xlsx" />
-    <div class="status" id="memberStatus"></div>
+<div id="bootScreen" style="display:none; min-height:100vh; align-items:center; justify-content:center; background:#eef1f6;">
+  <div class="card" style="width:400px;">
+    <div style="font-weight:700; font-size:16px; margin-bottom:4px;">🏭 최초 설정</div>
+    <div style="font-size:12.5px; color:#888; margin-bottom:16px;">이 저장소에 데이터가 아직 없습니다. 관리자 계정과 GitHub 토큰을 등록하면 시작할 수 있습니다.</div>
+    <label>GitHub Personal Access Token</label>
+    <input id="boot_token" type="password" placeholder="github_pat_..." style="width:100%;" />
+    <div class="notice">Fine-grained 토큰, 이 저장소(attendance-classifier)에 대해 Contents: Read and write 권한으로 발급하세요. 이 브라우저에만 저장되며 GitHub로만 전송됩니다.</div>
+    <label>관리자 사번</label><input id="boot_id" style="width:100%;" />
+    <label>관리자 이름</label><input id="boot_name" style="width:100%;" />
+    <div class="notice">초기 비밀번호는 사번과 동일하게 설정됩니다.</div>
+    <button class="primary" id="bootBtn" style="width:100%; margin-top:14px;">초기화하고 시작</button>
+    <div id="bootMsg" style="color:#c62828; font-size:12.5px; margin-top:10px;"></div>
   </div>
+</div>
 
-  <div class="card">
-    <h2><span class="num">2</span>출석 파일 업로드 (여러 개 가능)</h2>
-    <div class="sub" style="margin-bottom:10px;">사번이 들어있는 출석 파일들. 각 파일에 날짜·시간대를 지정하세요.</div>
-    <input type="file" id="attFiles" accept=".xls,.xlsx" multiple />
-    <div id="fileList" style="margin-top:10px;"></div>
+<div id="loginScreen" style="display:none; min-height:100vh; align-items:center; justify-content:center; background:#eef1f6;">
+  <div class="card" style="width:360px;">
+    <div class="row-flex" style="margin-bottom:14px;">
+      <div style="font-size:26px;">🏭</div>
+      <div>
+        <div style="font-weight:700; font-size:15px;">전국금속노동조합 현대중공업지부</div>
+        <div style="font-size:12px; color:#888;">참석확인서 집계관리</div>
+      </div>
+    </div>
+    <hr style="border:none; border-top:1px solid #edf0f4; margin-bottom:16px;" />
+    <h2 style="font-size:20px; margin:0 0 6px;">로그인</h2>
+    <div style="font-size:12.5px; color:#888; margin-bottom:16px;">승인된 사용자는 사번으로 로그인합니다. 최초 비밀번호는 사번입니다.</div>
+    <label style="font-size:12px; font-weight:700;">사번</label>
+    <input id="loginId" style="width:100%; margin:6px 0 12px;" />
+    <label style="font-size:12px; font-weight:700;">비밀번호</label>
+    <input id="loginPw" type="password" style="width:100%; margin:6px 0 16px;" />
+    <button class="primary" id="loginBtn" style="width:100%;">로그인</button>
+    <div id="loginMsg" style="color:#c62828; font-size:12.5px; margin-top:10px;"></div>
   </div>
+</div>
 
-  <button class="primary" id="processBtn" disabled>분류 시작</button>
-
-  <div id="results"></div>
-
-  <div class="footer-btns hidden" id="downloadRow">
-    <button class="primary" id="downloadBtn">📥 결과 엑셀로 다운로드</button>
+<div id="appScreen" style="display:none;">
+  <div style="background:#fff; border-bottom:1px solid #e5e8ee;">
+    <div class="wrap" style="display:flex; justify-content:space-between; align-items:center; padding-top:14px; padding-bottom:14px;">
+      <div class="row-flex">
+        <div style="font-size:22px;">🏭</div>
+        <div>
+          <div style="font-weight:700; font-size:15px;">전국금속노동조합 현대중공업지부</div>
+          <div style="font-size:12px; color:#888;">참석확인서 집계관리</div>
+        </div>
+      </div>
+      <div class="row-flex">
+        <div style="text-align:right; font-size:12.5px;">
+          <div style="font-weight:700;" id="userName"></div>
+          <div style="color:#888;" id="userInfo"></div>
+        </div>
+        <button class="ghost" id="logoutBtn">로그아웃</button>
+      </div>
+    </div>
+  </div>
+  <div class="wrap">
+    <h1 id="pageTitle" style="font-size:24px; margin:14px 0 4px;"></h1>
+    <div id="pageDesc" style="color:#888; font-size:13px; margin-bottom:16px;"></div>
+    <div class="row-flex" style="margin-bottom:16px; flex-wrap:wrap;">
+      <button class="tabbtn ghost" data-tab="events">일정 게시판</button>
+      <button class="tabbtn ghost" data-tab="participation">참여 현황</button>
+      <button class="tabbtn ghost" data-tab="aggregate">전체 집계</button>
+      <button class="tabbtn ghost" data-tab="members">조합원 명단</button>
+      <button class="tabbtn ghost" data-tab="users">사용자 설정</button>
+    </div>
+    <div id="content"></div>
   </div>
 </div>
 
 <script>
-let memberList = []; // [{사번,성명,전화번호,부서1,부서2,부서3,부서4,직급,성별,재직여부}]
-let memberMap = new Map();
-let pendingFiles = []; // {id, file, name}
-let processedResults = []; // {label, date, timeslot, matched:[], unmatched:[]}
+// ============================================================
+// GitHub 저장소 설정 — 이 저장소가 곧 데이터베이스입니다.
+// ============================================================
+const GH_OWNER = 'nsc8410';
+const GH_REPO = 'attendance-classifier';
+const GH_BRANCH = 'main';
+const GH_API = `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}`;
 
-const norm = (v) => String(v == null ? '' : v).trim().toUpperCase();
+const PATHS = {
+  members: 'data/members.json',
+  events: 'data/events.json',
+  attendance: 'data/attendance.json',
+  users: 'data/users.json',
+  settings: 'data/settings.json'
+};
 
-function findHeaderRow(rows) {
-  for (let i = 0; i < Math.min(rows.length, 5); i++) {
-    if (rows[i].some(c => String(c).trim() === '사번')) return i;
-  }
-  return -1;
+function getToken() { return localStorage.getItem('gh_pat') || ''; }
+function setToken(t) { localStorage.setItem('gh_pat', t); }
+
+function b64EncodeUnicode(str) {
+  const bytes = new TextEncoder().encode(str);
+  let binary = '';
+  bytes.forEach(b => binary += String.fromCharCode(b));
+  return btoa(binary);
 }
 
-document.getElementById('memberFile').addEventListener('change', async (e) => {
-  const file = e.target.files[0];
-  const statusEl = document.getElementById('memberStatus');
-  if (!file) return;
+async function readJSON(path, fallback) {
+  const url = `https://raw.githubusercontent.com/${GH_OWNER}/${GH_REPO}/${GH_BRANCH}/${path}?t=${Date.now()}`;
   try {
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) return fallback;
+    return await res.json();
+  } catch (err) {
+    return fallback;
+  }
+}
+
+async function ghFetch(endpoint, options = {}) {
+  const res = await fetch(`${GH_API}${endpoint}`, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${getToken()}`,
+      Accept: 'application/vnd.github+json',
+      ...(options.headers || {})
+    }
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`GitHub API 오류 (${res.status}): ${body.slice(0, 200)}`);
+  }
+  return res.json();
+}
+
+// filesObj: { 'data/events.json': arrayOrObject, ... } — 한 번의 커밋으로 여러 파일 동시 반영
+async function commitFiles(filesObj, message, retries = 3) {
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const ref = await ghFetch(`/git/ref/heads/${GH_BRANCH}`);
+      const latestSha = ref.object.sha;
+      const commit = await ghFetch(`/git/commits/${latestSha}`);
+      const baseTreeSha = commit.tree.sha;
+
+      const treeEntries = [];
+      for (const [path, data] of Object.entries(filesObj)) {
+        const content = JSON.stringify(data, null, 2);
+        const blob = await ghFetch(`/git/blobs`, {
+          method: 'POST',
+          body: JSON.stringify({ content: b64EncodeUnicode(content), encoding: 'base64' })
+        });
+        treeEntries.push({ path, mode: '100644', type: 'blob', sha: blob.sha });
+      }
+      const tree = await ghFetch(`/git/trees`, {
+        method: 'POST',
+        body: JSON.stringify({ base_tree: baseTreeSha, tree: treeEntries })
+      });
+      const newCommit = await ghFetch(`/git/commits`, {
+        method: 'POST',
+        body: JSON.stringify({ message, tree: tree.sha, parents: [latestSha] })
+      });
+      await ghFetch(`/git/refs/heads/${GH_BRANCH}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ sha: newCommit.sha })
+      });
+      return { ok: true };
+    } catch (err) {
+      if (attempt === retries - 1) return { ok: false, error: String(err.message || err) };
+      await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
+    }
+  }
+}
+
+function requireToken() {
+  if (!getToken()) {
+    alert('먼저 사용자 설정 탭에서 GitHub 토큰을 등록해주세요. (쓰기 작업에는 토큰이 필요합니다)');
+    return false;
+  }
+  return true;
+}
+
+// ============================================================
+// 부트스트랩 / 로그인
+// ============================================================
+let session = null;
+
+(async function init() {
+  const users = await readJSON(PATHS.users, null);
+  if (users === null) {
+    document.getElementById('bootScreen').style.display = 'flex';
+  } else {
+    const raw = sessionStorage.getItem('slog_session');
+    if (raw) { session = JSON.parse(raw); enterApp(); }
+    else document.getElementById('loginScreen').style.display = 'flex';
+  }
+})();
+
+document.getElementById('bootBtn').onclick = async () => {
+  const token = document.getElementById('boot_token').value.trim();
+  const empId = document.getElementById('boot_id').value.trim();
+  const name = document.getElementById('boot_name').value.trim();
+  const msg = document.getElementById('bootMsg');
+  if (!token || !empId || !name) { msg.textContent = '모든 항목을 입력하세요.'; return; }
+  setToken(token);
+  const res = await commitFiles({
+    [PATHS.users]: [{ empId, name, password: empId, role: '관리자', status: '사용' }],
+    [PATHS.settings]: { rate: 15000 },
+    [PATHS.events]: [],
+    [PATHS.attendance]: [],
+    [PATHS.members]: []
+  }, '초기 설정: 관리자 계정 생성');
+  if (!res.ok) { msg.textContent = '초기화 실패: ' + res.error + ' (토큰 권한을 확인하세요)'; return; }
+  location.reload();
+};
+
+document.getElementById('loginBtn').onclick = doLogin;
+document.getElementById('loginPw').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+
+async function doLogin() {
+  const empId = document.getElementById('loginId').value.trim();
+  const password = document.getElementById('loginPw').value;
+  const msg = document.getElementById('loginMsg');
+  if (!empId || !password) { msg.textContent = '사번과 비밀번호를 입력하세요.'; return; }
+  const users = await readJSON(PATHS.users, []);
+  const u = users.find(x => String(x.empId).trim() === empId);
+  if (!u) { msg.textContent = '승인되지 않은 사번입니다.'; return; }
+  if (u.status !== '사용') { msg.textContent = '사용이 중지된 계정입니다.'; return; }
+  if (String(u.password) !== password) { msg.textContent = '비밀번호가 올바르지 않습니다.'; return; }
+  session = { empId: u.empId, name: u.name, role: u.role };
+  sessionStorage.setItem('slog_session', JSON.stringify(session));
+  enterApp();
+}
+
+function enterApp() {
+  document.getElementById('bootScreen').style.display = 'none';
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('appScreen').style.display = 'block';
+  document.getElementById('userName').textContent = session.name;
+  document.getElementById('userInfo').textContent = `${session.empId} · ${session.role}`;
+  goTab('events');
+}
+
+document.getElementById('logoutBtn').onclick = () => {
+  sessionStorage.removeItem('slog_session');
+  session = null;
+  location.reload();
+};
+
+// ============================================================
+// 탭 라우팅
+// ============================================================
+document.querySelectorAll('.tabbtn').forEach(b => b.addEventListener('click', () => goTab(b.dataset.tab)));
+
+const TAB_META = {
+  events: ['일정 게시판', '등록된 일정에서 참석자 파일을 업로드합니다.'],
+  participation: ['참여 현황', '최근 일정별 참여 인원을 확인합니다.'],
+  aggregate: ['전체 집계', '기간을 지정해 개인별 참여시간과 지급액을 합산합니다.'],
+  members: ['조합원 명단', '사번은 정확일치, 이름은 앞글자부터 검색할 수 있습니다.'],
+  users: ['사용자 설정', 'GitHub 연결, 사용자 권한, 시간당 지급액을 관리합니다.']
+};
+
+function goTab(tab) {
+  document.querySelectorAll('.tabbtn').forEach(b => b.classList.toggle('primary', b.dataset.tab === tab));
+  document.querySelectorAll('.tabbtn').forEach(b => b.classList.toggle('ghost', b.dataset.tab !== tab));
+  document.getElementById('pageTitle').textContent = TAB_META[tab][0];
+  document.getElementById('pageDesc').textContent = TAB_META[tab][1];
+  const content = document.getElementById('content');
+  content.innerHTML = '<div class="card"><div class="empty">불러오는 중...</div></div>';
+  if (tab === 'events') renderEvents(content);
+  if (tab === 'participation') renderParticipation(content);
+  if (tab === 'aggregate') renderAggregate(content);
+  if (tab === 'members') renderMembers(content);
+  if (tab === 'users') renderUsers(content);
+}
+
+// ============================================================
+// 일정 게시판
+// ============================================================
+function computeHours(start, end) {
+  const [sh, sm] = start.split(':').map(Number);
+  const [eh, em] = end.split(':').map(Number);
+  let diff = (eh * 60 + em) - (sh * 60 + sm);
+  if (diff < 0) diff += 24 * 60;
+  return Math.round((diff / 60) * 100) / 100;
+}
+
+async function renderEvents(content, offset = 0) {
+  const [events, attendance, settings] = await Promise.all([
+    readJSON(PATHS.events, []), readJSON(PATHS.attendance, []), readJSON(PATHS.settings, { rate: 15000 })
+  ]);
+  events.sort((a, b) => b.date.localeCompare(a.date) || String(b.id).localeCompare(String(a.id)));
+  const countMap = {};
+  attendance.forEach(a => { countMap[a.eventId] = (countMap[a.eventId] || 0) + 1; });
+  const page = events.slice(offset, offset + 20);
+
+  content.innerHTML = `
+    <div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
+      <button class="primary" id="addEventBtn">일정 등록</button>
+    </div>
+    <div class="card">
+      <div class="row-flex" style="justify-content:space-between; margin-bottom:14px;">
+        <div style="font-weight:700; font-size:15px;">일정</div>
+        <div style="font-size:12.5px; color:#888;">현재 시간당 지급액: <b>${Number(settings.rate).toLocaleString()}원</b></div>
+      </div>
+      <div id="eventList">${page.length === 0 ? '<div class="empty">등록된 일정이 없습니다.</div>' :
+        page.map(ev => `
+          <div style="padding:14px 0; border-top:1px solid #edf0f4;">
+            <div class="row-flex" style="justify-content:space-between;">
+              <div>
+                <div class="link" style="font-weight:700; font-size:14.5px;" data-open="${ev.id}">${ev.name}</div>
+                <div style="font-size:12px; color:#888; margin-top:3px;">${ev.date} · ${ev.start}~${ev.end} · ${ev.hours}시간 · 등록 ${ev.regName} (${ev.regId})</div>
+              </div>
+              <div class="row-flex">
+                <span class="badge full">참석 ${countMap[ev.id] || 0}명</span>
+                <button class="icon danger" data-del="${ev.id}">삭제</button>
+              </div>
+            </div>
+          </div>`).join('')}
+      </div>
+      ${offset + 20 < events.length ? '<div style="text-align:right; margin-top:12px;"><button class="ghost" id="moreBtn">더 보기</button></div>' : ''}
+    </div>`;
+
+  document.getElementById('addEventBtn').onclick = () => openAddEventModal(() => renderEvents(content));
+  content.querySelectorAll('[data-open]').forEach(el => el.addEventListener('click', () => openEventDetail(el.dataset.open, content)));
+  content.querySelectorAll('[data-del]').forEach(el => el.addEventListener('click', async () => {
+    if (!requireToken()) return;
+    if (!confirm('이 일정과 출석기록을 삭제할까요?')) return;
+    const id = el.dataset.del;
+    const newEvents = events.filter(e => e.id !== id);
+    const newAttendance = attendance.filter(a => a.eventId !== id);
+    const res = await commitFiles({ [PATHS.events]: newEvents, [PATHS.attendance]: newAttendance }, `일정 삭제: ${id}`);
+    if (!res.ok) return alert('삭제 실패: ' + res.error);
+    renderEvents(content);
+  }));
+  const moreBtn = document.getElementById('moreBtn');
+  if (moreBtn) moreBtn.onclick = () => renderEvents(content, offset + 20);
+}
+
+function genId(prefix) {
+  return prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
+function openAddEventModal(onDone) {
+  if (!requireToken()) return;
+  const bg = document.createElement('div');
+  bg.className = 'modal-bg';
+  const today = new Date().toISOString().slice(0, 10);
+  bg.innerHTML = `
+    <div class="modal">
+      <h3 style="margin-top:0;">일정 등록</h3>
+      <label>행사명</label><input id="e_name" placeholder="예: 2026년 09월 16일 전조합원 7시간 부분파업(오전)" />
+      <label>날짜</label><input id="e_date" type="date" value="${today}" />
+      <div class="row-flex">
+        <div style="flex:1;"><label>시작시각</label><input id="e_start" type="time" value="08:00" /></div>
+        <div style="flex:1;"><label>종료시각</label><input id="e_end" type="time" value="12:00" /></div>
+      </div>
+      <div class="actions">
+        <button class="ghost" id="e_cancel">취소</button>
+        <button class="primary" id="e_save">저장</button>
+      </div>
+    </div>`;
+  document.body.appendChild(bg);
+  bg.querySelector('#e_cancel').onclick = () => bg.remove();
+  bg.querySelector('#e_save').onclick = async () => {
+    const name = bg.querySelector('#e_name').value.trim();
+    if (!name) return alert('행사명을 입력하세요.');
+    const date = bg.querySelector('#e_date').value;
+    const start = bg.querySelector('#e_start').value;
+    const end = bg.querySelector('#e_end').value;
+    const events = await readJSON(PATHS.events, []);
+    events.push({
+      id: genId('EV'), name, date, start, end, hours: computeHours(start, end),
+      regId: session.empId, regName: session.name, regAt: new Date().toISOString()
+    });
+    const res = await commitFiles({ [PATHS.events]: events }, `일정 등록: ${name}`);
+    if (res.ok) { bg.remove(); onDone(); } else alert('저장 실패: ' + res.error);
+  };
+}
+
+async function openEventDetail(id) {
+  const bg = document.createElement('div');
+  bg.className = 'modal-bg';
+  bg.innerHTML = `<div class="modal" style="width:560px;"><div class="empty">불러오는 중...</div></div>`;
+  document.body.appendChild(bg);
+  const events = await readJSON(PATHS.events, []);
+  const attendance = await readJSON(PATHS.attendance, []);
+  const ev = events.find(x => x.id === id);
+  const count = attendance.filter(a => a.eventId === id).length;
+  bg.querySelector('.modal').innerHTML = `
+    <h3 style="margin-top:0;">${ev ? ev.name : ''}</h3>
+    <div style="font-size:12.5px; color:#888; margin-bottom:12px;">${ev ? `${ev.date} · ${ev.start}~${ev.end} · ${ev.hours}시간 · 참석 ${count}명` : ''}</div>
+    <input type="file" id="attFile" accept=".xls,.xlsx" style="display:none" />
+    <button class="ghost" id="attUploadBtn">📤 참석자 명단 업로드 (사번 목록 엑셀)</button>
+    <div id="uploadResult" style="font-size:12.5px; margin-top:8px;"></div>
+    <div class="actions"><button class="ghost" id="e_close" style="flex:1;">닫기</button></div>`;
+  bg.querySelector('#e_close').onclick = () => { bg.remove(); goTab('events'); };
+  bg.querySelector('#attUploadBtn').onclick = () => {
+    if (!requireToken()) return;
+    bg.querySelector('#attFile').click();
+  };
+  bg.querySelector('#attFile').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
     const buf = await file.arrayBuffer();
     const wb = XLSX.read(buf, { type: 'array' });
     const ws = wb.Sheets[wb.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
-    const hIdx = findHeaderRow(rows);
-    if (hIdx === -1) throw new Error('사번 컬럼을 찾을 수 없습니다.');
-    const headers = rows[hIdx].map(h => String(h).trim());
-    const col = (name) => headers.indexOf(name);
-    const idxId = col('사번'), idxName = col('성명'), idxPhone = col('전화번호');
-    const idxD1 = col('부서1'), idxD2 = col('부서2'), idxD3 = col('부서3'), idxD4 = col('부서4');
-    const idxJik = col('직급'), idxSex = col('성별'), idxJae = col('재직여부');
-    memberList = [];
-    memberMap = new Map();
-    for (let i = hIdx + 1; i < rows.length; i++) {
-      const r = rows[i];
-      if (!r || r.every(c => String(c).trim() === '')) continue;
-      const id = String(r[idxId] ?? '').trim();
-      if (!id) continue;
-      const rec = {
-        사번: id,
-        성명: idxName >= 0 ? r[idxName] : '',
-        전화번호: idxPhone >= 0 ? r[idxPhone] : '',
-        부서1: idxD1 >= 0 ? r[idxD1] : '',
-        부서2: idxD2 >= 0 ? r[idxD2] : '',
-        부서3: idxD3 >= 0 ? r[idxD3] : '',
-        부서4: idxD4 >= 0 ? r[idxD4] : '',
-        직급: idxJik >= 0 ? r[idxJik] : '',
-        성별: idxSex >= 0 ? r[idxSex] : '',
-        재직여부: idxJae >= 0 ? r[idxJae] : ''
-      };
-      memberList.push(rec);
-      memberMap.set(norm(id), rec);
-    }
-    statusEl.textContent = `✅ ${memberList.length.toLocaleString()}명 로드 완료`;
-    statusEl.className = 'status ok';
-  } catch (err) {
-    statusEl.textContent = '❌ 파일을 읽는 중 오류: ' + err.message;
-    statusEl.className = 'status err';
-    memberList = []; memberMap = new Map();
-  }
-  updateProcessBtn();
-});
+    const empIds = rows.map(r => String(r[0] || '').trim()).filter(Boolean);
 
-let fileIdSeq = 0;
-document.getElementById('attFiles').addEventListener('change', (e) => {
-  const files = Array.from(e.target.files);
-  const today = new Date().toISOString().slice(0, 10);
-  for (const file of files) {
-    pendingFiles.push({ id: ++fileIdSeq, file, date: today, timeslot: '오전' });
-  }
-  renderFileList();
-  updateProcessBtn();
-  e.target.value = '';
-});
+    const members = await readJSON(PATHS.members, []);
+    const memberMap = new Map(members.map(m => [String(m.empId).trim().toUpperCase(), m]));
+    const currentAttendance = await readJSON(PATHS.attendance, []);
+    const existingSet = new Set(currentAttendance.filter(a => a.eventId === id).map(a => String(a.empId).trim().toUpperCase()));
 
-function renderFileList() {
-  const el = document.getElementById('fileList');
-  el.innerHTML = '';
-  pendingFiles.forEach(pf => {
-    const row = document.createElement('div');
-    row.className = 'file-row';
-    row.innerHTML = `
-      <span class="fname">${pf.file.name}</span>
-      <input type="date" value="${pf.date}" data-id="${pf.id}" class="dateInput" />
-      <select data-id="${pf.id}" class="slotInput">
-        <option value="오전" ${pf.timeslot === '오전' ? 'selected' : ''}>오전</option>
-        <option value="오후" ${pf.timeslot === '오후' ? 'selected' : ''}>오후</option>
-      </select>
-      <button class="remove" data-id="${pf.id}">삭제</button>
-    `;
-    el.appendChild(row);
-  });
-  el.querySelectorAll('.dateInput').forEach(inp => inp.addEventListener('change', (e) => {
-    const pf = pendingFiles.find(p => p.id == e.target.dataset.id);
-    if (pf) pf.date = e.target.value;
-  }));
-  el.querySelectorAll('.slotInput').forEach(sel => sel.addEventListener('change', (e) => {
-    const pf = pendingFiles.find(p => p.id == e.target.dataset.id);
-    if (pf) pf.timeslot = e.target.value;
-  }));
-  el.querySelectorAll('.remove').forEach(btn => btn.addEventListener('click', (e) => {
-    pendingFiles = pendingFiles.filter(p => p.id != e.target.dataset.id);
-    renderFileList();
-    updateProcessBtn();
-  }));
-}
-
-function updateProcessBtn() {
-  document.getElementById('processBtn').disabled = !(memberList.length > 0 && pendingFiles.length > 0);
-}
-
-document.getElementById('processBtn').addEventListener('click', async () => {
-  processedResults = [];
-  const resultsEl = document.getElementById('results');
-  resultsEl.innerHTML = '';
-  for (const pf of pendingFiles) {
-    const buf = await pf.file.arrayBuffer();
-    const wb = XLSX.read(buf, { type: 'array' });
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
-    const matched = [];
+    let matched = 0, duplicated = 0;
     const unmatched = [];
-    for (const r of rows) {
-      const idRaw = String(r[0] ?? '').trim();
-      if (!idRaw) continue;
-      const group = String(r[1] ?? '').trim();
-      const key = norm(idRaw);
+    const newRecords = [];
+    empIds.forEach(rawId => {
+      const key = String(rawId).trim().toUpperCase();
+      if (!key) return;
+      if (existingSet.has(key)) { duplicated++; return; }
       const m = memberMap.get(key);
-      if (m) {
-        matched.push({ 사번: idRaw, 지단: group, ...m });
-      } else {
-        unmatched.push(idRaw);
-      }
-    }
-    const label = `${pf.date}_${pf.timeslot}`;
-    processedResults.push({ label, date: pf.date, timeslot: pf.timeslot, fileName: pf.file.name, matched, unmatched });
-  }
-  renderResults();
-  document.getElementById('downloadRow').classList.remove('hidden');
-});
+      if (!m) { unmatched.push(rawId); return; }
+      newRecords.push({ id: genId('AT'), eventId: id, empId: m.empId, name: m.name, at: new Date().toISOString() });
+      existingSet.add(key);
+      matched++;
+    });
 
-function renderResults() {
-  const el = document.getElementById('results');
-  el.innerHTML = '';
-  processedResults.forEach(res => {
-    const block = document.createElement('div');
-    block.className = 'card result-block';
-    let unmatchedHtml = '';
-    if (res.unmatched.length > 0) {
-      unmatchedHtml = `<div class="unmatched-box">⚠️ 명단에서 찾을 수 없는 사번 ${res.unmatched.length}건: ${res.unmatched.join(', ')}</div>`;
+    const resDiv = bg.querySelector('#uploadResult');
+    if (newRecords.length === 0) {
+      resDiv.textContent = `추가된 인원 없음 (중복 ${duplicated}건, 미매칭 ${unmatched.length}건)`;
+      e.target.value = '';
+      return;
     }
-    const rowsHtml = res.matched.slice(0, 50).map(m => `
-      <tr><td>${m.사번}</td><td>${m.지단 || ''}</td><td>${m.성명}</td><td>${m.전화번호}</td><td>${m.부서1}</td><td>${m.부서2}</td><td>${m.부서3}</td><td>${m.직급}</td></tr>
-    `).join('');
-    const moreNote = res.matched.length > 50 ? `<div class="result-meta">화면에는 처음 50건만 표시됩니다. 전체는 다운로드 파일에서 확인하세요.</div>` : '';
-    block.innerHTML = `
-      <div class="result-title">${res.label} <span class="result-meta">(${res.fileName})</span></div>
-      <div class="result-meta">매칭 ${res.matched.length}명 / 미매칭 ${res.unmatched.length}건</div>
-      ${unmatchedHtml}
-      <div class="scroll" style="margin-top:8px;">
+    const res = await commitFiles({ [PATHS.attendance]: [...currentAttendance, ...newRecords] }, `출석자 업로드: ${id} (+${matched}명)`);
+    e.target.value = '';
+    if (!res.ok) { resDiv.textContent = '업로드 실패: ' + res.error; return; }
+    resDiv.innerHTML = `매칭 ${matched}명 등록${duplicated ? `, 중복 ${duplicated}건 제외` : ''}${unmatched.length ? `, 명단에 없는 사번 ${unmatched.length}건: ${unmatched.join(', ')}` : ''}`;
+  });
+}
+
+// ============================================================
+// 참여 현황
+// ============================================================
+async function renderParticipation(content) {
+  const [events, attendance] = await Promise.all([readJSON(PATHS.events, []), readJSON(PATHS.attendance, [])]);
+  if (events.length === 0) { content.innerHTML = '<div class="card empty">데이터가 없습니다.</div>'; return; }
+  const countMap = {};
+  attendance.forEach(a => { countMap[a.eventId] = (countMap[a.eventId] || 0) + 1; });
+  const sorted = [...events].sort((a, b) => a.date.localeCompare(b.date));
+  const last12 = sorted.slice(-12).map(e => ({ date: e.date, name: e.name, count: countMap[e.id] || 0 }));
+  const max = Math.max(...last12.map(i => i.count), 1);
+  content.innerHTML = `
+    <div class="card">
+      <div style="font-weight:700; font-size:15px; margin-bottom:2px;">최근 일정 참여 현황</div>
+      <div style="font-size:12.5px; color:#888; margin-bottom:20px;">최근 ${last12.length}개 일정의 참석 인원입니다.</div>
+      <div style="display:flex; align-items:flex-end; gap:16px; height:260px; border-bottom:2px solid #edf0f4; padding:0 10px;">
+        ${last12.map(i => `
+          <div style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:100%;">
+            <div style="font-weight:700; font-size:13px; margin-bottom:6px;">${i.count}</div>
+            <div style="width:70%; background:linear-gradient(#5b7fc7,#2f4f8f); border-radius:6px 6px 0 0; height:${Math.max((i.count / max) * 200, 4)}px;"></div>
+          </div>`).join('')}
+      </div>
+      <div style="display:flex; gap:16px; padding:10px 10px 0;">
+        ${last12.map(i => `<div style="flex:1; text-align:center; font-size:11.5px; color:#888;">${i.date}<br/><span style="font-size:10.5px;">${i.name}</span></div>`).join('')}
+      </div>
+    </div>`;
+}
+
+// ============================================================
+// 전체 집계
+// ============================================================
+async function renderAggregate(content) {
+  const today = new Date().toISOString().slice(0, 10);
+  const monthAgo = new Date(Date.now() - 20 * 86400000).toISOString().slice(0, 10);
+  const settings = await readJSON(PATHS.settings, { rate: 15000 });
+  content.innerHTML = `
+    <div class="card">
+      <div style="font-weight:700; font-size:15px;">기간 전체 집계</div>
+      <div style="font-size:12.5px; color:#888; margin-bottom:14px;">예: 9월 1일~9월 27일 동안 참여한 모든 일정을 개인별로 합산합니다.</div>
+      <div class="row-flex" style="flex-wrap:wrap;">
+        <div><label style="font-size:12px; font-weight:700; display:block; margin-bottom:4px;">시작일</label><input type="date" id="agFrom" value="${monthAgo}" /></div>
+        <div><label style="font-size:12px; font-weight:700; display:block; margin-bottom:4px;">종료일</label><input type="date" id="agTo" value="${today}" /></div>
+      </div>
+      <div class="notice">시간당 지급액: ${Number(settings.rate).toLocaleString()}원 · 각 일정의 저장된 참여시간을 합산하여 총 지급액을 계산합니다.</div>
+      <div class="row-flex" style="margin-top:14px;">
+        <button class="primary" id="agRunBtn">전체 집계 조회</button>
+        <button class="ghost" id="agExportBtn">전체 집계 엑셀 출력</button>
+      </div>
+      <div id="agResult" style="margin-top:18px;"></div>
+    </div>`;
+
+  let lastData = null;
+  async function runAggregate(dateFrom, dateTo) {
+    const [events, attendance, members] = await Promise.all([
+      readJSON(PATHS.events, []), readJSON(PATHS.attendance, []), readJSON(PATHS.members, [])
+    ]);
+    const inRange = events.filter(e => e.date >= dateFrom && e.date <= dateTo);
+    const eventIds = new Set(inRange.map(e => e.id));
+    const eventMap = new Map(inRange.map(e => [e.id, e]));
+    const memberMap = new Map(members.map(m => [String(m.empId).trim().toUpperCase(), m]));
+    const rate = settings.rate;
+
+    const perPerson = new Map();
+    attendance.filter(a => eventIds.has(a.eventId)).forEach(a => {
+      const key = String(a.empId).trim().toUpperCase();
+      const ev = eventMap.get(a.eventId);
+      if (!perPerson.has(key)) {
+        const m = memberMap.get(key) || {};
+        perPerson.set(key, {
+          group: m.group || '', empId: a.empId, name: a.name || m.name, dept: m.dept || '',
+          phone: m.phone || '', bank: m.bank || '', account: m.account || '', count: 0, hours: 0, records: []
+        });
+      }
+      const p = perPerson.get(key);
+      p.count++; p.hours += Number(ev.hours) || 0;
+      p.records.push(`${ev.date} ${ev.start}~${ev.end} (${ev.hours}시간)`);
+    });
+    const people = Array.from(perPerson.values()).map(p => ({ ...p, pay: Math.round(p.hours * rate) }));
+    const groupMap = new Map();
+    people.forEach(p => {
+      const g = p.group || '미지정';
+      if (!groupMap.has(g)) groupMap.set(g, { group: g, count: 0, hours: 0, pay: 0 });
+      const gg = groupMap.get(g);
+      gg.count++; gg.hours += p.hours; gg.pay += p.pay;
+    });
+    return {
+      dateFrom, dateTo, rate, eventCount: inRange.length, peopleCount: people.length,
+      recordCount: attendance.filter(a => eventIds.has(a.eventId)).length,
+      totalHours: people.reduce((s, p) => s + p.hours, 0), totalPay: people.reduce((s, p) => s + p.pay, 0),
+      people, groups: Array.from(groupMap.values())
+    };
+  }
+
+  document.getElementById('agRunBtn').onclick = async () => {
+    const dateFrom = document.getElementById('agFrom').value;
+    const dateTo = document.getElementById('agTo').value;
+    lastData = await runAggregate(dateFrom, dateTo);
+    document.getElementById('agResult').innerHTML = `
+      <div style="font-weight:700; font-size:14.5px; margin-bottom:4px;">${dateFrom} ~ ${dateTo} 집계 완료</div>
+      <div class="summary-grid">
+        <div class="box"><b>일정</b><span>${lastData.eventCount}건</span></div>
+        <div class="box"><b>참여 인원</b><span>${lastData.peopleCount}명</span></div>
+        <div class="box"><b>참여 건수</b><span>${lastData.recordCount}건</span></div>
+        <div class="box"><b>총 참여시간</b><span>${lastData.totalHours}시간</span></div>
+        <div class="box"><b>예상 지급액</b><span>${lastData.totalPay.toLocaleString()}원</span></div>
+      </div>`;
+  };
+  document.getElementById('agExportBtn').onclick = async () => {
+    const dateFrom = document.getElementById('agFrom').value;
+    const dateTo = document.getElementById('agTo').value;
+    const data = lastData && lastData.dateFrom === dateFrom && lastData.dateTo === dateTo ? lastData : await runAggregate(dateFrom, dateTo);
+    exportAggregateExcel(data);
+  };
+}
+
+function exportAggregateExcel(data) {
+  const wb = XLSX.utils.book_new();
+  const personRows = data.people.map(p => ({
+    '지단/지회': p.group, 사번: p.empId, 성명: p.name, 소속: p.dept, 참여일수: p.count,
+    '총 참여시간': p.hours, '시간당 지급액': data.rate, '총 지급액': p.pay,
+    '참여일자 및 시간': p.records.join(', '), 휴대전화번호: p.phone, 은행: p.bank, 계좌번호: p.account
+  }));
+  const ws1 = XLSX.utils.json_to_sheet(personRows, { origin: 'A4' });
+  XLSX.utils.sheet_add_aoa(ws1, [
+    ['기간 전체 참석 집계'],
+    [`${data.dateFrom} ~ ${data.dateTo} · 일정 ${data.eventCount}건 · 참여 ${data.peopleCount}명 · 총 ${data.totalHours}시간 · 시간당 ${data.rate.toLocaleString()}원`]
+  ], { origin: 'A1' });
+  XLSX.utils.book_append_sheet(wb, ws1, '기간별 개인 집계');
+
+  const groupRows = data.groups.map(g => ({ '지단/지회': g.group, 인원수: g.count, '총 참여시간': g.hours, '총 지급액': g.pay }));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(groupRows), '기간별 지단 집계');
+
+  const smsRows = data.people.map(p => ({
+    성명: p.name, 휴대전화번호: p.phone,
+    안내문구: `[현중지부] ${p.name}님, ${data.dateFrom}~${data.dateTo} 파업 참여(${p.hours}시간) 수당 ${p.pay.toLocaleString()}원이 지급 예정입니다.`
+  }));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(smsRows), '문자발송용');
+
+  XLSX.writeFile(wb, `${data.dateFrom}_${data.dateTo}_전체집계.xlsx`);
+}
+
+// ============================================================
+// 조합원 명단
+// ============================================================
+async function renderMembers(content, offset = 0, q = '') {
+  content.innerHTML = `
+    <div class="card">
+      <div class="row-flex" style="justify-content:space-between; margin-bottom:6px;">
+        <div style="font-weight:700; font-size:15px;">조합원 명단</div>
+        <button class="primary" id="replaceBtn">명단 교체 등록</button>
+      </div>
+      <div class="row-flex" style="margin-bottom:14px;">
+        <input id="mq" placeholder="사번 또는 이름 검색" style="flex:1;" value="${q}" />
+        <button class="ghost" id="mSearchBtn">검색</button>
+        <input type="file" id="replaceFile" accept=".xls,.xlsx" style="display:none" />
+      </div>
+      <div id="memberTableWrap"><div class="empty">불러오는 중...</div></div>
+    </div>`;
+  document.getElementById('mSearchBtn').onclick = () => renderMembers(content, 0, document.getElementById('mq').value.trim());
+  document.getElementById('mq').addEventListener('keydown', e => { if (e.key === 'Enter') renderMembers(content, 0, e.target.value.trim()); });
+  document.getElementById('replaceBtn').onclick = () => { if (requireToken()) document.getElementById('replaceFile').click(); };
+  document.getElementById('replaceFile').addEventListener('change', (e) => handleReplaceMembers(e, () => renderMembers(content)));
+
+  const all = await readJSON(PATHS.members, []);
+  let results = all;
+  if (q) {
+    results = /^[0-9A-Za-z]+$/.test(q)
+      ? all.filter(m => String(m.empId).trim().toUpperCase() === q.toUpperCase())
+      : all.filter(m => String(m.name).startsWith(q));
+  }
+  const total = results.length;
+  const page = results.slice(offset, offset + 50);
+
+  const wrap = document.getElementById('memberTableWrap');
+  wrap.innerHTML = `
+    <div style="font-size:12.5px; color:#888; margin-bottom:8px;">총 ${total.toLocaleString()}명 · 숫자 입력은 사번 정확검색, 한글 입력은 이름 검색</div>
+    <table>
+      <thead><tr><th>지단</th><th>사번</th><th>성명</th><th>소속</th><th>연락처/계좌</th><th></th></tr></thead>
+      <tbody>${page.map(m => {
+        const has1 = !!m.phone, has2 = !!(m.bank && m.account);
+        const status = has1 && has2 ? '<span class="badge full">등록완료</span>' : (has1 || has2) ? '<span class="badge part">일부 등록</span>' : '<span class="badge none">미등록</span>';
+        return `<tr>
+          <td>${m.group || ''}</td><td>${m.empId}</td><td>${m.name}</td><td>${m.dept || ''}</td><td>${status}</td>
+          <td class="row-flex"><button class="icon ghost" data-edit="${m.empId}">정보수정</button><button class="icon danger" data-del="${m.empId}">삭제</button></td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>
+    ${offset + 50 < total ? '<div style="text-align:right; margin-top:10px;"><button class="ghost" id="mMoreBtn">더 보기</button></div>' : ''}`;
+  wrap.querySelectorAll('[data-edit]').forEach(el => el.addEventListener('click', () => {
+    if (!requireToken()) return;
+    openMemberModal(page.find(m => m.empId === el.dataset.edit), () => renderMembers(content, offset, q));
+  }));
+  wrap.querySelectorAll('[data-del]').forEach(el => el.addEventListener('click', async () => {
+    if (!requireToken()) return;
+    if (!confirm('이 조합원을 삭제할까요?')) return;
+    const newList = all.filter(m => String(m.empId).trim().toUpperCase() !== el.dataset.del.toUpperCase());
+    const res = await commitFiles({ [PATHS.members]: newList }, `조합원 삭제: ${el.dataset.del}`);
+    if (!res.ok) return alert('삭제 실패: ' + res.error);
+    renderMembers(content, offset, q);
+  }));
+  const moreBtn = document.getElementById('mMoreBtn');
+  if (moreBtn) moreBtn.onclick = () => renderMembers(content, offset + 50, q);
+}
+
+function openMemberModal(m, onDone) {
+  const bg = document.createElement('div');
+  bg.className = 'modal-bg';
+  bg.innerHTML = `
+    <div class="modal">
+      <h3 style="margin-top:0;">조합원 정보 수정</h3>
+      <label>지단</label><input id="mm_group" value="${m.group || ''}" />
+      <label>사번</label><input id="mm_id" value="${m.empId}" disabled />
+      <label>성명</label><input id="mm_name" value="${m.name || ''}" />
+      <label>소속</label><input id="mm_dept" value="${m.dept || ''}" />
+      <label>전화번호</label><input id="mm_phone" value="${m.phone || ''}" />
+      <div class="row-flex">
+        <div style="flex:1;"><label>은행</label><input id="mm_bank" value="${m.bank || ''}" /></div>
+        <div style="flex:1.4;"><label>계좌번호</label><input id="mm_account" value="${m.account || ''}" /></div>
+      </div>
+      <div class="actions">
+        <button class="ghost" id="mm_cancel">취소</button>
+        <button class="primary" id="mm_save">저장</button>
+      </div>
+    </div>`;
+  document.body.appendChild(bg);
+  bg.querySelector('#mm_cancel').onclick = () => bg.remove();
+  bg.querySelector('#mm_save').onclick = async () => {
+    const all = await readJSON(PATHS.members, []);
+    const idx = all.findIndex(x => String(x.empId).trim().toUpperCase() === String(m.empId).trim().toUpperCase());
+    const updated = {
+      group: bg.querySelector('#mm_group').value, empId: m.empId, name: bg.querySelector('#mm_name').value,
+      dept: bg.querySelector('#mm_dept').value, phone: bg.querySelector('#mm_phone').value,
+      bank: bg.querySelector('#mm_bank').value, account: bg.querySelector('#mm_account').value
+    };
+    if (idx >= 0) all[idx] = updated; else all.push(updated);
+    const res = await commitFiles({ [PATHS.members]: all }, `조합원 정보 수정: ${m.empId}`);
+    if (!res.ok) return alert('저장 실패: ' + res.error);
+    bg.remove(); onDone();
+  };
+}
+
+async function handleReplaceMembers(e, onDone) {
+  const file = e.target.files[0];
+  if (!file) return;
+  if (!confirm('현재 조합원 명단 전체를 이 파일 내용으로 교체합니다. 계속할까요?')) { e.target.value = ''; return; }
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: 'array' });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const raw = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
+  const hIdx = raw.findIndex(r => r.includes('사번'));
+  const headers = hIdx >= 0 ? raw[hIdx] : ['지단', '사번', '성명', '소속', '전화번호', '은행', '계좌번호'];
+  const start = hIdx >= 0 ? hIdx + 1 : 0;
+  const col = (n) => headers.indexOf(n);
+  const rows = [];
+  for (let i = start; i < raw.length; i++) {
+    const r = raw[i];
+    if (!r || r.every(c => String(c).trim() === '')) continue;
+    const empId = String(r[col('사번')] ?? '').trim();
+    if (!empId) continue;
+    rows.push({
+      group: r[col('지단')] ?? '', empId, name: r[col('성명')] ?? '', dept: r[col('소속')] ?? '',
+      phone: r[col('전화번호')] ?? '', bank: r[col('은행')] ?? '', account: r[col('계좌번호')] ?? ''
+    });
+  }
+  const res = await commitFiles({ [PATHS.members]: rows }, `조합원 명단 교체 (${rows.length}명)`);
+  e.target.value = '';
+  if (res.ok) { alert(`${rows.length.toLocaleString()}명으로 교체 완료`); onDone(); }
+  else alert('교체 실패: ' + res.error);
+}
+
+// ============================================================
+// 사용자 설정 (+ GitHub 연결)
+// ============================================================
+async function renderUsers(content) {
+  const [users, settings] = await Promise.all([readJSON(PATHS.users, []), readJSON(PATHS.settings, { rate: 15000 })]);
+  const hasToken = !!getToken();
+  content.innerHTML = `
+    <div class="card">
+      <div style="font-weight:700; font-size:15px; margin-bottom:2px;">GitHub 연결</div>
+      <div style="font-size:12.5px; color:#888; margin-bottom:12px;">일정 등록, 출석자 업로드, 명단 수정 등 쓰기 작업에는 이 브라우저에 저장된 GitHub 토큰이 필요합니다.</div>
+      <div class="row-flex">
+        <span class="badge ${hasToken ? 'full' : 'none'}">${hasToken ? '토큰 등록됨' : '토큰 없음'}</span>
+        <button class="ghost" id="tokenBtn">${hasToken ? '토큰 변경' : '토큰 등록'}</button>
+      </div>
+    </div>
+    <div class="card">
+      <div style="font-weight:700; font-size:15px; margin-bottom:2px;">지급 설정</div>
+      <div style="font-size:12.5px; color:#888; margin-bottom:12px;">모든 일정과 기간 전체 집계에 공통으로 적용됩니다.</div>
+      <div class="row-flex">
+        <input id="rateInput" type="number" value="${settings.rate}" style="width:160px;" />
+        <span style="font-size:13px;">원 / 1시간</span>
+        <button class="primary" id="rateSaveBtn">저장</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="row-flex" style="justify-content:space-between; margin-bottom:4px;">
+        <div style="font-weight:700; font-size:15px;">승인 사용자</div>
+        <button class="primary" id="addUserBtn">사용자 추가</button>
+      </div>
+      <div style="font-size:12.5px; color:#888; margin-bottom:12px;">여기에 등록된 사번만 최초 로그인할 수 있습니다.</div>
+      <div id="userTableWrap">
         <table>
-          <thead><tr><th>사번</th><th>지단</th><th>성명</th><th>전화번호</th><th>부서1</th><th>부서2</th><th>부서3</th><th>직급</th></tr></thead>
-          <tbody>${rowsHtml}</tbody>
+          <thead><tr><th>사번</th><th>이름</th><th>권한</th><th>상태</th><th></th></tr></thead>
+          <tbody>${users.map(u => `
+            <tr><td>${u.empId}</td><td>${u.name}</td><td>${u.role}</td><td>${u.status}</td>
+            <td><button class="icon danger" data-del="${u.empId}">삭제</button></td></tr>`).join('')}</tbody>
         </table>
       </div>
-      ${moreNote}
-    `;
-    el.appendChild(block);
-  });
+    </div>`;
+
+  document.getElementById('tokenBtn').onclick = () => openTokenModal(() => renderUsers(content));
+  document.getElementById('rateSaveBtn').onclick = async () => {
+    if (!requireToken()) return;
+    const res = await commitFiles({ [PATHS.settings]: { rate: Number(document.getElementById('rateInput').value) } }, '시간당 지급액 변경');
+    if (res.ok) alert('저장되었습니다.'); else alert('저장 실패: ' + res.error);
+  };
+  document.getElementById('addUserBtn').onclick = () => { if (requireToken()) openAddUserModal(() => renderUsers(content)); };
+  content.querySelectorAll('[data-del]').forEach(el => el.addEventListener('click', async () => {
+    if (!requireToken()) return;
+    if (el.dataset.del === session.empId) return alert('본인 계정은 삭제할 수 없습니다.');
+    if (!confirm('이 사용자를 삭제할까요?')) return;
+    const newUsers = users.filter(u => u.empId !== el.dataset.del);
+    const res = await commitFiles({ [PATHS.users]: newUsers }, `사용자 삭제: ${el.dataset.del}`);
+    if (!res.ok) return alert('삭제 실패: ' + res.error);
+    renderUsers(content);
+  }));
 }
 
-document.getElementById('downloadBtn').addEventListener('click', () => {
-  const wb = XLSX.utils.book_new();
-  processedResults.forEach(res => {
-    const data = res.matched.map(m => ({
-      사번: m.사번, 지단: m.지단, 성명: m.성명, 전화번호: m.전화번호,
-      부서1: m.부서1, 부서2: m.부서2, 부서3: m.부서3, 부서4: m.부서4, 직급: m.직급, 성별: m.성별, 재직여부: m.재직여부
-    }));
-    const ws = XLSX.utils.json_to_sheet(data);
-    let sheetName = res.label.replace(/[\\/?*[\]:]/g, '_').slice(0, 31);
-    XLSX.utils.book_append_sheet(wb, ws, sheetName);
-    if (res.unmatched.length > 0) {
-      const wsU = XLSX.utils.json_to_sheet(res.unmatched.map(id => ({ 미매칭사번: id })));
-      XLSX.utils.book_append_sheet(wb, wsU, (sheetName + '_미매칭').slice(0, 31));
-    }
-  });
-  const today = new Date().toISOString().slice(0, 10);
-  XLSX.writeFile(wb, `출석분류결과_${today}.xlsx`);
-});
+function openTokenModal(onDone) {
+  const bg = document.createElement('div');
+  bg.className = 'modal-bg';
+  bg.innerHTML = `
+    <div class="modal">
+      <h3 style="margin-top:0;">GitHub 토큰 등록</h3>
+      <div class="notice">github.com → Settings → Developer settings → Fine-grained tokens에서 이 저장소(${GH_REPO})에 대해 Contents: Read and write 권한으로 발급하세요. 토큰은 이 브라우저에만 저장됩니다.</div>
+      <label>Personal Access Token</label><input id="tk_val" type="password" placeholder="github_pat_..." />
+      <div class="actions">
+        <button class="ghost" id="tk_cancel">취소</button>
+        <button class="primary" id="tk_save">저장</button>
+      </div>
+    </div>`;
+  document.body.appendChild(bg);
+  bg.querySelector('#tk_cancel').onclick = () => bg.remove();
+  bg.querySelector('#tk_save').onclick = () => {
+    const v = bg.querySelector('#tk_val').value.trim();
+    if (!v) return alert('토큰을 입력하세요.');
+    setToken(v);
+    bg.remove(); onDone();
+  };
+}
+
+function openAddUserModal(onDone) {
+  const bg = document.createElement('div');
+  bg.className = 'modal-bg';
+  bg.innerHTML = `
+    <div class="modal">
+      <h3 style="margin-top:0;">사용자 추가</h3>
+      <label>사번</label><input id="u_id" />
+      <label>이름</label><input id="u_name" />
+      <label>권한</label><select id="u_role"><option>관리자</option><option>일반</option></select>
+      <div class="notice">최초 비밀번호는 사번과 동일하게 설정됩니다.</div>
+      <div class="actions">
+        <button class="ghost" id="u_cancel">취소</button>
+        <button class="primary" id="u_save">저장</button>
+      </div>
+    </div>`;
+  document.body.appendChild(bg);
+  bg.querySelector('#u_cancel').onclick = () => bg.remove();
+  bg.querySelector('#u_save').onclick = async () => {
+    const empId = bg.querySelector('#u_id').value.trim();
+    const name = bg.querySelector('#u_name').value.trim();
+    if (!empId || !name) return alert('사번과 이름을 입력하세요.');
+    const users = await readJSON(PATHS.users, []);
+    if (users.some(u => u.empId === empId)) return alert('이미 등록된 사번입니다.');
+    users.push({ empId, name, password: empId, role: bg.querySelector('#u_role').value, status: '사용' });
+    const res = await commitFiles({ [PATHS.users]: users }, `사용자 추가: ${empId}`);
+    if (!res.ok) return alert('저장 실패: ' + res.error);
+    bg.remove(); onDone();
+  };
+}
 </script>
 </body>
 </html>
