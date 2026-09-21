@@ -870,6 +870,8 @@ async function handleReplaceMembers(content, e) {
   const file = e.target.files[0];
   if (!file) return;
   if (!confirm('현재 조합원 명단 전체를 이 파일 내용으로 교체합니다. 계속할까요?')) { e.target.value = ''; return; }
+  const btn = document.getElementById('replaceBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 처리 중...'; }
   const buf = await file.arrayBuffer();
   const wb = XLSX.read(buf, { type: 'array' });
   const ws = wb.Sheets[wb.SheetNames[0]];
@@ -892,7 +894,7 @@ async function handleReplaceMembers(content, e) {
   const res = await commitFiles({ [PATHS.members]: rows }, `조합원 명단 교체 (${rows.length}명)`);
   e.target.value = '';
   if (res.ok) { alert(`${rows.length.toLocaleString()}명으로 교체 완료`); renderMembers(content, 0, '', rows); }
-  else alert('교체 실패: ' + res.error);
+  else { if (btn) { btn.disabled = false; btn.textContent = '명단 교체 등록'; } alert('교체 실패: ' + res.error); }
 }
 
 // ============================================================
