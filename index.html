@@ -137,7 +137,31 @@ function b64EncodeUnicode(str) {
   return btoa(binary);
 }
 
+function b64DecodeUnicode(b64) {
+  const binary = atob(b64.replace(/\n/g, ''));
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new TextDecoder('utf-8').decode(bytes);
+}
+
 async function readJSON(path, fallback) {
+  // 토큰(=쓰기 권한)이 있는 사람은 GitHub API로 직접 읽어 지연 없이 항상 최신 상태를 본다.
+  // 토큰 없는 순수 조회자는 raw.githubusercontent.com을 쓰며, 드물게 몇 분 지연될 수 있다.
+  if (getToken()) {
+    try {
+      const res = await fetch(`${GH_API}/contents/${path}?ref=${GH_BRANCH}&_=${Date.now()}`, {
+        headers: { Authorization: `Bearer ${getToken()}`, Accept: 'application/vnd.github+json' },
+        cache: 'no-store'
+      });
+      if (res.status === 404) return fallback;
+      if (res.ok) {
+        const json = await res.json();
+        return JSON.parse(b64DecodeUnicode(json.content));
+      }
+    } catch (err) {
+      // 실패하면 아래 raw 방식으로 폴백
+    }
+  }
   const url = `https://raw.githubusercontent.com/${GH_OWNER}/${GH_REPO}/${GH_BRANCH}/${path}?t=${Date.now()}`;
   try {
     const res = await fetch(url, { cache: 'no-store' });
