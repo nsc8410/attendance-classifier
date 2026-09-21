@@ -664,6 +664,7 @@ async function renderAggregate(content) {
       <div class="row-flex" style="flex-wrap:wrap;">
         <div><label style="font-size:12px; font-weight:700; display:block; margin-bottom:4px;">시작일</label><input type="date" id="agFrom" value="${monthAgo}" /></div>
         <div><label style="font-size:12px; font-weight:700; display:block; margin-bottom:4px;">종료일</label><input type="date" id="agTo" value="${today}" /></div>
+        <div><label style="font-size:12px; font-weight:700; display:block; margin-bottom:4px;">지급일</label><input type="date" id="agPayDate" /></div>
       </div>
       <div class="notice">시간당 지급액: ${Number(settings.rate).toLocaleString()}원 · 각 일정의 저장된 참여시간을 합산하여 총 지급액을 계산합니다.</div>
       <div class="row-flex" style="margin-top:14px;">
@@ -692,7 +693,8 @@ async function renderAggregate(content) {
         const m = memberMap.get(key) || {};
         perPerson.set(key, {
           group: m.group || '', empId: a.empId, name: a.name || m.name, dept: m.dept || '',
-          phone: m.phone || '', bank: m.bank || '', account: m.account || '', count: 0, hours: 0, records: []
+          phone: m.phone || '', bank: m.bank || '', account: m.account || '', holder: m.holder || '',
+          count: 0, hours: 0, records: []
         });
       }
       const p = perPerson.get(key);
@@ -703,9 +705,9 @@ async function renderAggregate(content) {
     const groupMap = new Map();
     people.forEach(p => {
       const g = p.group || '미지정';
-      if (!groupMap.has(g)) groupMap.set(g, { group: g, count: 0, hours: 0, pay: 0 });
+      if (!groupMap.has(g)) groupMap.set(g, { group: g, peopleCount: 0, recordCount: 0, hours: 0, pay: 0 });
       const gg = groupMap.get(g);
-      gg.count++; gg.hours += p.hours; gg.pay += p.pay;
+      gg.peopleCount++; gg.recordCount += p.count; gg.hours += p.hours; gg.pay += p.pay;
     });
     return {
       dateFrom, dateTo, rate, eventCount: inRange.length, peopleCount: people.length,
@@ -732,31 +734,47 @@ async function renderAggregate(content) {
   document.getElementById('agExportBtn').onclick = async () => {
     const dateFrom = document.getElementById('agFrom').value;
     const dateTo = document.getElementById('agTo').value;
+    const payDate = document.getElementById('agPayDate').value;
     const data = lastData && lastData.dateFrom === dateFrom && lastData.dateTo === dateTo ? lastData : await runAggregate(dateFrom, dateTo);
-    exportAggregateExcel(data);
+    exportAggregateExcel(data, payDate);
   };
 }
 
-function exportAggregateExcel(data) {
+function dotDate(s) { return String(s || '').replace(/-/g, '.'); }
+
+function exportAggregateExcel(data, payDate) {
   const wb = XLSX.utils.book_new();
+  const payDateLabel = payDate ? dotDate(payDate) : '';
+
   const personRows = data.people.map(p => ({
     '지단/지회': p.group, 사번: p.empId, 성명: p.name, 소속: p.dept, 참여일수: p.count,
     '총 참여시간': p.hours, '시간당 지급액': data.rate, '총 지급액': p.pay,
-    '참여일자 및 시간': p.records.join(', '), 휴대전화번호: p.phone, 은행: p.bank, 계좌번호: p.account
+    '참여일자 및 시간': p.records.join(', '), 휴대전화번호: p.phone, 은행: p.bank, 계좌번호: p.account, 예금주: p.holder
   }));
   const ws1 = XLSX.utils.json_to_sheet(personRows, { origin: 'A4' });
   XLSX.utils.sheet_add_aoa(ws1, [
     ['기간 전체 참석 집계'],
-    [`${data.dateFrom} ~ ${data.dateTo} · 일정 ${data.eventCount}건 · 참여 ${data.peopleCount}명 · 총 ${data.totalHours}시간 · 시간당 ${data.rate.toLocaleString()}원`]
+    [`${dotDate(data.dateFrom)} ~ ${dotDate(data.dateTo)} · 일정 ${data.eventCount}건 · 참여 ${data.peopleCount}명 · 총 ${data.totalHours}시간 · 시간당 ${data.rate.toLocaleString()}원`]
   ], { origin: 'A1' });
   XLSX.utils.book_append_sheet(wb, ws1, '기간별 개인 집계');
 
-  const groupRows = data.groups.map(g => ({ '지단/지회': g.group, 인원수: g.count, '총 참여시간': g.hours, '총 지급액': g.pay }));
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(groupRows), '기간별 지단 집계');
+  const groupRows = data.groups.map(g => ({
+    구분: g.group, '참여 인원': g.peopleCount, '참여 건수': g.recordCount,
+    '총 참여시간': g.hours, '시간당 지급액': data.rate, '총 지급액': g.pay
+  }));
+  const ws2 = XLSX.utils.json_to_sheet(groupRows, { origin: 'A4' });
+  XLSX.utils.sheet_add_aoa(ws2, [
+    ['기간별 지단·지회 집계'],
+    [`${dotDate(data.dateFrom)} ~ ${dotDate(data.dateTo)}`]
+  ], { origin: 'A1' });
+  XLSX.utils.book_append_sheet(wb, ws2, '기간별 지단 집계');
 
   const smsRows = data.people.map(p => ({
-    성명: p.name, 휴대전화번호: p.phone,
-    안내문구: `[현중지부] ${p.name}님, ${data.dateFrom}~${data.dateTo} 파업 참여(${p.hours}시간) 수당 ${p.pay.toLocaleString()}원이 지급 예정입니다.`
+    휴대전화번호: p.phone, 성함: p.name,
+    '파업참여 날짜,시간': p.records.map(r => r.replace(/\s\(\d+(\.\d+)?시간\)$/, '')).join(', '),
+    '파업참여 시간': `총 ${p.hours}시간`,
+    집행비용: `${p.pay.toLocaleString()}원`,
+    은행: p.bank, 계좌번호: p.account, '지급 일자': payDateLabel
   }));
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(smsRows), '문자발송용');
 
@@ -776,7 +794,7 @@ async function renderMembers(content, offset = 0, q = '', presetAll = null) {
           <button class="primary" id="replaceBtn">명단 교체 등록</button>
         </div>
       </div>
-      <div style="font-size:12px; color:#888; margin-bottom:10px;">계좌정보 일괄 등록: 사번·은행·계좌번호만 있는 엑셀을 올리면, 나머지 정보는 그대로 두고 사번이 일치하는 조합원의 은행/계좌번호만 채워집니다.</div>
+      <div style="font-size:12px; color:#888; margin-bottom:10px;">계좌정보 일괄 등록: 사번·은행·계좌번호·예금주(선택)만 있는 엑셀을 올리면, 나머지 정보는 그대로 두고 사번이 일치하는 조합원의 계좌정보만 채워집니다.</div>
       <div class="row-flex" style="margin-bottom:14px;">
         <input id="mq" placeholder="사번 또는 이름 검색" style="flex:1;" value="${q}" />
         <button class="ghost" id="mSearchBtn">검색</button>
@@ -848,6 +866,7 @@ function openMemberModal(m, currentAll, content, offset, q) {
         <div style="flex:1;"><label>은행</label><input id="mm_bank" value="${m.bank || ''}" /></div>
         <div style="flex:1.4;"><label>계좌번호</label><input id="mm_account" value="${m.account || ''}" /></div>
       </div>
+      <label>예금주</label><input id="mm_holder" value="${m.holder || ''}" />
       <div class="actions">
         <button class="ghost" id="mm_cancel">취소</button>
         <button class="primary" id="mm_save">저장</button>
@@ -863,7 +882,8 @@ function openMemberModal(m, currentAll, content, offset, q) {
     const updated = {
       group: bg.querySelector('#mm_group').value, empId: m.empId, name: bg.querySelector('#mm_name').value,
       dept: bg.querySelector('#mm_dept').value, phone: bg.querySelector('#mm_phone').value,
-      bank: bg.querySelector('#mm_bank').value, account: bg.querySelector('#mm_account').value
+      bank: bg.querySelector('#mm_bank').value, account: bg.querySelector('#mm_account').value,
+      holder: bg.querySelector('#mm_holder').value
     };
     if (idx >= 0) all[idx] = updated; else all.push(updated);
     const res = await commitFiles({ [PATHS.members]: all }, `조합원 정보 수정: ${m.empId}`);
@@ -915,15 +935,16 @@ async function handleBankUpdate(content, e) {
   const raw = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
 
   const hIdx = raw.findIndex(r => r.includes('사번'));
-  let idIdx, bankIdx, accountIdx, start;
+  let idIdx, bankIdx, accountIdx, holderIdx, start;
   if (hIdx >= 0) {
     const headers = raw[hIdx];
     idIdx = headers.indexOf('사번');
     bankIdx = headers.indexOf('은행');
     accountIdx = headers.indexOf('계좌번호');
+    holderIdx = headers.indexOf('예금주');
     start = hIdx + 1;
   } else {
-    idIdx = 0; bankIdx = 1; accountIdx = 2; start = 0; // 헤더가 없으면 사번,은행,계좌번호 순서로 간주
+    idIdx = 0; bankIdx = 1; accountIdx = 2; holderIdx = 3; start = 0; // 헤더가 없으면 사번,은행,계좌번호,예금주 순서로 간주
   }
 
   const updates = [];
@@ -935,7 +956,8 @@ async function handleBankUpdate(content, e) {
     updates.push({
       empId,
       bank: bankIdx >= 0 ? String(r[bankIdx] ?? '').trim() : '',
-      account: accountIdx >= 0 ? String(r[accountIdx] ?? '').trim() : ''
+      account: accountIdx >= 0 ? String(r[accountIdx] ?? '').trim() : '',
+      holder: holderIdx >= 0 ? String(r[holderIdx] ?? '').trim() : ''
     });
   }
 
@@ -948,6 +970,7 @@ async function handleBankUpdate(content, e) {
     if (idx === undefined) { unmatched.push(u.empId); return; }
     if (u.bank) all[idx].bank = u.bank;
     if (u.account) all[idx].account = u.account;
+    if (u.holder) all[idx].holder = u.holder;
     matched++;
   });
 
