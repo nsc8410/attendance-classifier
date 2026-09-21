@@ -771,12 +771,17 @@ async function renderMembers(content, offset = 0, q = '', presetAll = null) {
     <div class="card">
       <div class="row-flex" style="justify-content:space-between; margin-bottom:6px;">
         <div style="font-weight:700; font-size:15px;">조합원 명단</div>
-        <button class="primary" id="replaceBtn">명단 교체 등록</button>
+        <div class="row-flex">
+          <button class="ghost" id="bankUpdateBtn">계좌정보 일괄 등록</button>
+          <button class="primary" id="replaceBtn">명단 교체 등록</button>
+        </div>
       </div>
+      <div style="font-size:12px; color:#888; margin-bottom:10px;">계좌정보 일괄 등록: 사번·은행·계좌번호만 있는 엑셀을 올리면, 나머지 정보는 그대로 두고 사번이 일치하는 조합원의 은행/계좌번호만 채워집니다.</div>
       <div class="row-flex" style="margin-bottom:14px;">
         <input id="mq" placeholder="사번 또는 이름 검색" style="flex:1;" value="${q}" />
         <button class="ghost" id="mSearchBtn">검색</button>
         <input type="file" id="replaceFile" accept=".xls,.xlsx" style="display:none" />
+        <input type="file" id="bankFile" accept=".xls,.xlsx" style="display:none" />
       </div>
       <div id="memberTableWrap"><div class="empty">불러오는 중...</div></div>
     </div>`;
@@ -784,6 +789,8 @@ async function renderMembers(content, offset = 0, q = '', presetAll = null) {
   document.getElementById('mq').addEventListener('keydown', e => { if (e.key === 'Enter') renderMembers(content, 0, e.target.value.trim()); });
   document.getElementById('replaceBtn').onclick = () => { if (requireToken()) document.getElementById('replaceFile').click(); };
   document.getElementById('replaceFile').addEventListener('change', (e) => handleReplaceMembers(content, e));
+  document.getElementById('bankUpdateBtn').onclick = () => { if (requireToken()) document.getElementById('bankFile').click(); };
+  document.getElementById('bankFile').addEventListener('change', (e) => handleBankUpdate(content, e));
 
   const all = presetAll || await readJSON(PATHS.members, []);
   let results = all;
@@ -895,6 +902,61 @@ async function handleReplaceMembers(content, e) {
   e.target.value = '';
   if (res.ok) { alert(`${rows.length.toLocaleString()}명으로 교체 완료`); renderMembers(content, 0, '', rows); }
   else { if (btn) { btn.disabled = false; btn.textContent = '명단 교체 등록'; } alert('교체 실패: ' + res.error); }
+}
+
+async function handleBankUpdate(content, e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const btn = document.getElementById('bankUpdateBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 처리 중...'; }
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: 'array' });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const raw = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
+
+  const hIdx = raw.findIndex(r => r.includes('사번'));
+  let idIdx, bankIdx, accountIdx, start;
+  if (hIdx >= 0) {
+    const headers = raw[hIdx];
+    idIdx = headers.indexOf('사번');
+    bankIdx = headers.indexOf('은행');
+    accountIdx = headers.indexOf('계좌번호');
+    start = hIdx + 1;
+  } else {
+    idIdx = 0; bankIdx = 1; accountIdx = 2; start = 0; // 헤더가 없으면 사번,은행,계좌번호 순서로 간주
+  }
+
+  const updates = [];
+  for (let i = start; i < raw.length; i++) {
+    const r = raw[i];
+    if (!r || r.every(c => String(c).trim() === '')) continue;
+    const empId = String(r[idIdx] ?? '').trim();
+    if (!empId) continue;
+    updates.push({
+      empId,
+      bank: bankIdx >= 0 ? String(r[bankIdx] ?? '').trim() : '',
+      account: accountIdx >= 0 ? String(r[accountIdx] ?? '').trim() : ''
+    });
+  }
+
+  const all = await readJSON(PATHS.members, []);
+  const indexMap = new Map(all.map((m, i) => [String(m.empId).trim().toUpperCase(), i]));
+  let matched = 0;
+  const unmatched = [];
+  updates.forEach(u => {
+    const idx = indexMap.get(u.empId.toUpperCase());
+    if (idx === undefined) { unmatched.push(u.empId); return; }
+    if (u.bank) all[idx].bank = u.bank;
+    if (u.account) all[idx].account = u.account;
+    matched++;
+  });
+
+  const res = await commitFiles({ [PATHS.members]: all }, `계좌정보 일괄 등록 (${matched}명)`);
+  e.target.value = '';
+  if (btn) { btn.disabled = false; btn.textContent = '계좌정보 일괄 등록'; }
+  if (!res.ok) return alert('저장 실패: ' + res.error);
+  alert(`계좌정보 ${matched}명 업데이트 완료${unmatched.length ? `\n명단에 없는 사번 ${unmatched.length}건: ${unmatched.join(', ')}` : ''}`);
+  renderMembers(content, 0, '', all);
 }
 
 // ============================================================
