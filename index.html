@@ -451,14 +451,20 @@ async function renderEvents(content, offset = 0, preset = null) {
 
   if (isAdmin()) document.getElementById('addEventBtn').onclick = () => openAddEventModal(content, events, attendance, settings);
   content.querySelectorAll('[data-open]').forEach(el => el.addEventListener('click', () => openEventDetail(el.dataset.open, content)));
-  content.querySelectorAll('[data-del]').forEach(el => el.addEventListener('click', async () => {
+  content.querySelectorAll('[data-del]').forEach(el => el.addEventListener('click', async (ev2) => {
     if (!requireToken()) return;
     if (!confirm('이 일정과 출석기록을 삭제할까요?')) return;
+    const btn = ev2.currentTarget;
+    btn.disabled = true; btn.textContent = '삭제 중...';
     const id = el.dataset.del;
     const newEvents = events.filter(e => e.id !== id);
     const newAttendance = attendance.filter(a => a.eventId !== id);
-    const res = await commitFiles({ [PATHS.events]: newEvents, [PATHS.attendance]: newAttendance }, `일정 삭제: ${id}`);
-    if (!res.ok) return alert('삭제 실패: ' + res.error);
+    // 파일 2개를 한 번에 묶어 저장하면 저장소 전체 기준으로 충돌이 잦아지므로,
+    // 파일별로 따로(빠른 단일 파일 경로) 순서대로 저장한다.
+    const res1 = await commitFiles({ [PATHS.events]: newEvents }, `일정 삭제: ${id}`);
+    if (!res1.ok) { btn.disabled = false; btn.textContent = '삭제'; return alert('삭제 실패: ' + res1.error); }
+    const res2 = await commitFiles({ [PATHS.attendance]: newAttendance }, `일정 삭제에 따른 출석기록 정리: ${id}`);
+    if (!res2.ok) { alert('일정은 삭제됐지만 출석기록 정리는 실패했습니다: ' + res2.error + ' (다시 삭제를 시도해보세요)'); }
     renderEvents(content, 0, { events: newEvents, attendance: newAttendance, settings });
   }));
   const prevBtn = document.getElementById('prevPageBtn');
