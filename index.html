@@ -401,6 +401,7 @@ function computeHours(start, end) {
 }
 
 async function renderEvents(content, offset = 0, preset = null) {
+  const EVENTS_PAGE_SIZE = 7;
   // preset: 방금 이 브라우저에서 직접 쓴 데이터가 있으면 그걸 바로 쓰고,
   // GitHub의 읽기 캐시(raw.githubusercontent.com)가 갱신될 때까지 기다리지 않는다.
   const [events, attendance, settings] = preset ? [preset.events, preset.attendance, preset.settings] : await Promise.all([
@@ -409,7 +410,12 @@ async function renderEvents(content, offset = 0, preset = null) {
   events.sort((a, b) => b.date.localeCompare(a.date) || String(b.id).localeCompare(String(a.id)));
   const countMap = {};
   attendance.forEach(a => { countMap[a.eventId] = (countMap[a.eventId] || 0) + 1; });
-  const page = events.slice(offset, offset + 20);
+  const totalPages = Math.max(1, Math.ceil(events.length / EVENTS_PAGE_SIZE));
+  const curPage = Math.floor(offset / EVENTS_PAGE_SIZE);
+  const page = events.slice(offset, offset + EVENTS_PAGE_SIZE);
+
+  const pageNumbers = [];
+  for (let p = 0; p < totalPages; p++) pageNumbers.push(p);
 
   content.innerHTML = `
     <div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
@@ -435,7 +441,12 @@ async function renderEvents(content, offset = 0, preset = null) {
             </div>
           </div>`).join('')}
       </div>
-      ${offset + 20 < events.length ? '<div style="text-align:right; margin-top:12px;"><button class="ghost" id="moreBtn">더 보기</button></div>' : ''}
+      ${totalPages > 1 ? `
+      <div class="row-flex" style="justify-content:center; margin-top:16px; flex-wrap:wrap;">
+        <button class="ghost icon" id="prevPageBtn" ${curPage === 0 ? 'disabled' : ''}>이전</button>
+        ${pageNumbers.map(p => `<button class="icon ${p === curPage ? 'primary' : 'ghost'}" data-page="${p}">${p + 1}</button>`).join('')}
+        <button class="ghost icon" id="nextPageBtn" ${curPage === totalPages - 1 ? 'disabled' : ''}>다음</button>
+      </div>` : ''}
     </div>`;
 
   if (isAdmin()) document.getElementById('addEventBtn').onclick = () => openAddEventModal(content, events, attendance, settings);
@@ -450,8 +461,12 @@ async function renderEvents(content, offset = 0, preset = null) {
     if (!res.ok) return alert('삭제 실패: ' + res.error);
     renderEvents(content, 0, { events: newEvents, attendance: newAttendance, settings });
   }));
-  const moreBtn = document.getElementById('moreBtn');
-  if (moreBtn) moreBtn.onclick = () => renderEvents(content, offset + 20, { events, attendance, settings });
+  const prevBtn = document.getElementById('prevPageBtn');
+  const nextBtn = document.getElementById('nextPageBtn');
+  if (prevBtn) prevBtn.onclick = () => renderEvents(content, (curPage - 1) * EVENTS_PAGE_SIZE, { events, attendance, settings });
+  if (nextBtn) nextBtn.onclick = () => renderEvents(content, (curPage + 1) * EVENTS_PAGE_SIZE, { events, attendance, settings });
+  content.querySelectorAll('[data-page]').forEach(el => el.addEventListener('click', () =>
+    renderEvents(content, Number(el.dataset.page) * EVENTS_PAGE_SIZE, { events, attendance, settings })));
 }
 
 function genId(prefix) {
