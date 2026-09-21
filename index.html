@@ -191,7 +191,43 @@ async function ghFetch(endpoint, options = {}) {
 // filesObj: { 'data/events.json': arrayOrObject, ... } — 한 번의 커밋으로 여러 파일 동시 반영
 // 여러 탭/사용자가 동시에 쓰기 작업을 하면 "fast forward" 충돌이 나므로, 실패 시 매번
 // 최신 상태를 다시 읽어 자동으로 여러 번 재시도한다. 사용자는 보통 버튼을 다시 누를 필요가 없다.
+// 파일 1개만 바꿀 땐 Contents API로 2번만 호출해서 빠르게 저장(대부분의 경우).
+// 파일 여러 개를 한 번에 바꿔야 할 땐(예: 일정 삭제 시 일정+출석기록 동시 반영) 기존의
+// 원자적 커밋(Git Data API, 6단계) 방식을 그대로 쓴다.
 async function commitFiles(filesObj, message, retries = 6) {
+  const paths = Object.keys(filesObj);
+  if (paths.length === 1) return commitSingleFile(paths[0], filesObj[paths[0]], message, retries);
+  return commitFilesAtomic(filesObj, message, retries);
+}
+
+async function commitSingleFile(path, data, message, retries = 6) {
+  const content = b64EncodeUnicode(JSON.stringify(data, null, 2));
+  let lastErr = null;
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      let sha;
+      try {
+        const cur = await ghFetch(`/contents/${path}?ref=${GH_BRANCH}&_=${Date.now()}`);
+        sha = cur.sha;
+      } catch (e) {
+        sha = undefined; // 파일이 아직 없으면 새로 생성
+      }
+      const body = { message, content, branch: GH_BRANCH };
+      if (sha) body.sha = sha;
+      await ghFetch(`/contents/${path}`, { method: 'PUT', body: JSON.stringify(body) });
+      return { ok: true };
+    } catch (err) {
+      lastErr = err;
+      const isConflict = /409|sha/i.test(String(err.message || err));
+      if (attempt === retries - 1) break;
+      const base = isConflict ? 250 : 700;
+      await new Promise(r => setTimeout(r, base * (attempt + 1) + Math.random() * 250));
+    }
+  }
+  return { ok: false, error: friendlyCommitError_(lastErr) };
+}
+
+async function commitFilesAtomic(filesObj, message, retries = 6) {
   let lastErr = null;
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
@@ -226,16 +262,18 @@ async function commitFiles(filesObj, message, retries = 6) {
       lastErr = err;
       const isConflict = /not a fast forward|422/.test(String(err.message || err));
       if (attempt === retries - 1) break;
-      // 충돌이면 짧게, 다른 오류면 조금 더 기다렸다가 재시도 (지수 백오프 + 무작위성)
       const base = isConflict ? 300 : 800;
       await new Promise(r => setTimeout(r, base * (attempt + 1) + Math.random() * 300));
     }
   }
+  return { ok: false, error: friendlyCommitError_(lastErr) };
+}
+
+function friendlyCommitError_(lastErr) {
   const msg = String(lastErr && (lastErr.message || lastErr));
-  const friendly = /not a fast forward|422/.test(msg)
+  return /not a fast forward|422|409/.test(msg)
     ? '다른 곳에서 동시에 저장 중이라 계속 충돌했습니다. 이 사이트를 열어둔 다른 탭/창을 모두 닫고 하나에서만 다시 시도해주세요.'
     : msg;
-  return { ok: false, error: friendly };
 }
 
 function requireToken() {
@@ -350,12 +388,16 @@ function goTab(tab) {
 // ============================================================
 // 일정 게시판
 // ============================================================
+// start/end는 정시(0~23) 정수. 점심시간(12시~13시)과 겹치는 만큼 자동으로 제외한다.
+function fmtHour(h) { return String(h).padStart(2, '0') + '시'; }
+
 function computeHours(start, end) {
-  const [sh, sm] = start.split(':').map(Number);
-  const [eh, em] = end.split(':').map(Number);
-  let diff = (eh * 60 + em) - (sh * 60 + sm);
-  if (diff < 0) diff += 24 * 60;
-  return Math.round((diff / 60) * 100) / 100;
+  let total = end - start;
+  if (total < 0) total += 24; // 자정을 넘는 경우
+  const overlapStart = Math.max(start, 12);
+  const overlapEnd = Math.min(start + total, 13);
+  const lunchOverlap = Math.max(0, overlapEnd - overlapStart);
+  return Math.max(0, total - lunchOverlap);
 }
 
 async function renderEvents(content, offset = 0, preset = null) {
@@ -384,7 +426,7 @@ async function renderEvents(content, offset = 0, preset = null) {
             <div class="row-flex" style="justify-content:space-between;">
               <div>
                 <div class="link" style="font-weight:700; font-size:14.5px;" data-open="${ev.id}">${ev.name}</div>
-                <div style="font-size:12px; color:#888; margin-top:3px;">${ev.date} · ${ev.start}~${ev.end} · ${ev.hours}시간 · 등록 ${ev.regName} (${ev.regId})</div>
+                <div style="font-size:12px; color:#888; margin-top:3px;">${ev.date} · ${fmtHour(ev.start)}~${fmtHour(ev.end)} · ${ev.hours}시간 · 등록 ${ev.regName} (${ev.regId})</div>
               </div>
               <div class="row-flex">
                 <span class="badge full">참석 ${countMap[ev.id] || 0}명</span>
@@ -396,7 +438,7 @@ async function renderEvents(content, offset = 0, preset = null) {
       ${offset + 20 < events.length ? '<div style="text-align:right; margin-top:12px;"><button class="ghost" id="moreBtn">더 보기</button></div>' : ''}
     </div>`;
 
-  if (isAdmin()) document.getElementById('addEventBtn').onclick = () => openAddEventModal(content, events);
+  if (isAdmin()) document.getElementById('addEventBtn').onclick = () => openAddEventModal(content, events, attendance, settings);
   content.querySelectorAll('[data-open]').forEach(el => el.addEventListener('click', () => openEventDetail(el.dataset.open, content)));
   content.querySelectorAll('[data-del]').forEach(el => el.addEventListener('click', async () => {
     if (!requireToken()) return;
@@ -416,7 +458,13 @@ function genId(prefix) {
   return prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
-function openAddEventModal(content, currentEvents) {
+function hourOptions(selected) {
+  let opts = '';
+  for (let h = 0; h < 24; h++) opts += `<option value="${h}" ${h === selected ? 'selected' : ''}>${String(h).padStart(2, '0')}시</option>`;
+  return opts;
+}
+
+function openAddEventModal(content, currentEvents, currentAttendance, currentSettings) {
   if (!requireToken()) return;
   const bg = document.createElement('div');
   bg.className = 'modal-bg';
@@ -427,22 +475,30 @@ function openAddEventModal(content, currentEvents) {
       <label>행사명</label><input id="e_name" placeholder="예: 2026년 09월 16일 전조합원 7시간 부분파업(오전)" />
       <label>날짜</label><input id="e_date" type="date" value="${today}" />
       <div class="row-flex">
-        <div style="flex:1;"><label>시작시각</label><input id="e_start" type="time" value="08:00" /></div>
-        <div style="flex:1;"><label>종료시각</label><input id="e_end" type="time" value="12:00" /></div>
+        <div style="flex:1;"><label>시작시각</label><select id="e_start">${hourOptions(8)}</select></div>
+        <div style="flex:1;"><label>종료시각</label><select id="e_end">${hourOptions(12)}</select></div>
       </div>
+      <div class="notice" id="e_hoursPreview"></div>
       <div class="actions">
         <button class="ghost" id="e_cancel">취소</button>
         <button class="primary" id="e_save">저장</button>
       </div>
     </div>`;
   document.body.appendChild(bg);
+  const preview = () => {
+    const s = Number(bg.querySelector('#e_start').value), e = Number(bg.querySelector('#e_end').value);
+    bg.querySelector('#e_hoursPreview').textContent = `참여시간: ${computeHours(s, e)}시간 (점심시간 12~13시는 자동으로 제외됩니다)`;
+  };
+  bg.querySelector('#e_start').addEventListener('change', preview);
+  bg.querySelector('#e_end').addEventListener('change', preview);
+  preview();
   bg.querySelector('#e_cancel').onclick = () => bg.remove();
   bg.querySelector('#e_save').onclick = async () => {
     const name = bg.querySelector('#e_name').value.trim();
     if (!name) return alert('행사명을 입력하세요.');
     const date = bg.querySelector('#e_date').value;
-    const start = bg.querySelector('#e_start').value;
-    const end = bg.querySelector('#e_end').value;
+    const start = Number(bg.querySelector('#e_start').value);
+    const end = Number(bg.querySelector('#e_end').value);
     const saveBtn = bg.querySelector('#e_save');
     saveBtn.disabled = true; saveBtn.textContent = '저장 중...';
     const newEvent = {
@@ -453,10 +509,8 @@ function openAddEventModal(content, currentEvents) {
     const res = await commitFiles({ [PATHS.events]: updatedEvents }, `일정 등록: ${name}`);
     if (!res.ok) { saveBtn.disabled = false; saveBtn.textContent = '저장'; return alert('저장 실패: ' + res.error); }
     bg.remove();
-    // 저장 직후에는 GitHub 읽기 캐시가 아직 갱신 안 됐을 수 있으므로,
-    // 방금 저장한 events 배열을 그대로 화면에 반영한다 (attendance/settings만 새로 읽음).
-    const [attendance, settings] = await Promise.all([readJSON(PATHS.attendance, []), readJSON(PATHS.settings, { rate: 15000 })]);
-    renderEvents(content, 0, { events: updatedEvents, attendance, settings });
+    // events.json만 바뀌었으므로 attendance/settings는 이미 있던 값을 그대로 재사용 (추가 조회 없음)
+    renderEvents(content, 0, { events: updatedEvents, attendance: currentAttendance, settings: currentSettings });
   };
 }
 
@@ -472,35 +526,27 @@ async function openEventDetail(id, content) {
   let count = attendance.filter(a => a.eventId === id).length;
   bg.querySelector('.modal').innerHTML = `
     <h3 style="margin-top:0;">${ev ? ev.name : ''}</h3>
-    <div style="font-size:12.5px; color:#888; margin-bottom:12px;">${ev ? `${ev.date} · ${ev.start}~${ev.end} · ${ev.hours}시간 · 참석 ${count}명` : ''}</div>
+    <div style="font-size:12.5px; color:#888; margin-bottom:12px;" id="e_meta">${ev ? `${ev.date} · ${fmtHour(ev.start)}~${fmtHour(ev.end)} · ${ev.hours}시간 · 참석 ${count}명` : ''}</div>
     <input type="file" id="attFile" accept=".xls,.xlsx" style="display:none" />
     <button class="ghost" id="attUploadBtn">📤 참석자 명단 업로드 (사번 목록 엑셀)</button>
     <div id="uploadResult" style="font-size:12.5px; margin-top:8px;"></div>
+    <hr style="border:none; border-top:1px solid #edf0f4; margin:16px 0;" />
+    <label>누락된 인원 개별 추가 (사번, 여러 명은 쉼표/공백으로 구분)</label>
+    <div class="row-flex">
+      <input id="manualIds" placeholder="예: 2101069, 2202036" style="flex:1;" />
+      <button class="primary" id="manualAddBtn">추가</button>
+    </div>
+    <div id="manualResult" style="font-size:12.5px; margin-top:8px;"></div>
     <div class="actions"><button class="ghost" id="e_close" style="flex:1;">닫기</button></div>`;
   bg.querySelector('#e_close').onclick = () => { bg.remove(); renderEvents(content, 0, { events, attendance, settings }); };
-  bg.querySelector('#attUploadBtn').onclick = () => {
-    if (!requireToken()) return;
-    bg.querySelector('#attFile').click();
-  };
-  bg.querySelector('#attFile').addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const uploadBtn = bg.querySelector('#attUploadBtn');
-    const resDivEarly = bg.querySelector('#uploadResult');
-    uploadBtn.disabled = true;
-    uploadBtn.textContent = '⏳ 업로드 처리 중...';
-    resDivEarly.textContent = '';
-    const buf = await file.arrayBuffer();
-    const wb = XLSX.read(buf, { type: 'array' });
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
-    const empIds = rows.map(r => String(r[0] || '').trim()).filter(Boolean);
 
+  async function applyNewAttendees(empIds, resDiv, busyBtn, busyLabel, idleLabel) {
+    busyBtn.disabled = true;
+    busyBtn.textContent = busyLabel;
+    resDiv.textContent = '';
     const members = await readJSON(PATHS.members, []);
     const memberMap = new Map(members.map(m => [String(m.empId).trim().toUpperCase(), m]));
-    const currentAttendance = attendance; // 모달을 연 시점의 최신 데이터를 그대로 사용
-    const existingSet = new Set(currentAttendance.filter(a => a.eventId === id).map(a => String(a.empId).trim().toUpperCase()));
-
+    const existingSet = new Set(attendance.filter(a => a.eventId === id).map(a => String(a.empId).trim().toUpperCase()));
     let matched = 0, duplicated = 0;
     const unmatched = [];
     const newRecords = [];
@@ -514,24 +560,44 @@ async function openEventDetail(id, content) {
       existingSet.add(key);
       matched++;
     });
-
-    const resDiv = bg.querySelector('#uploadResult');
     if (newRecords.length === 0) {
       resDiv.textContent = `추가된 인원 없음 (중복 ${duplicated}건, 미매칭 ${unmatched.length}건)`;
-      e.target.value = '';
-      uploadBtn.disabled = false;
-      uploadBtn.textContent = '📤 참석자 명단 업로드 (사번 목록 엑셀)';
+      busyBtn.disabled = false; busyBtn.textContent = idleLabel;
       return;
     }
-    const updatedAttendance = [...currentAttendance, ...newRecords];
-    const res = await commitFiles({ [PATHS.attendance]: updatedAttendance }, `출석자 업로드: ${id} (+${matched}명)`);
-    e.target.value = '';
-    uploadBtn.disabled = false;
-    uploadBtn.textContent = '📤 참석자 명단 업로드 (사번 목록 엑셀)';
-    if (!res.ok) { resDiv.textContent = '업로드 실패: ' + res.error; return; }
-    attendance = updatedAttendance; // 닫기 눌렀을 때 목록에 바로 반영되도록 갱신
+    const updatedAttendance = [...attendance, ...newRecords];
+    const res = await commitFiles({ [PATHS.attendance]: updatedAttendance }, `출석자 추가: ${id} (+${matched}명)`);
+    busyBtn.disabled = false; busyBtn.textContent = idleLabel;
+    if (!res.ok) { resDiv.textContent = '저장 실패: ' + res.error; return; }
+    attendance = updatedAttendance;
     count = attendance.filter(a => a.eventId === id).length;
+    bg.querySelector('#e_meta').textContent = ev ? `${ev.date} · ${fmtHour(ev.start)}~${fmtHour(ev.end)} · ${ev.hours}시간 · 참석 ${count}명` : '';
     resDiv.innerHTML = `매칭 ${matched}명 등록${duplicated ? `, 중복 ${duplicated}건 제외` : ''}${unmatched.length ? `, 명단에 없는 사번 ${unmatched.length}건: ${unmatched.join(', ')}` : ''}`;
+  }
+
+  bg.querySelector('#manualAddBtn').onclick = async () => {
+    if (!requireToken()) return;
+    const raw = bg.querySelector('#manualIds').value;
+    const empIds = raw.split(/[,\s]+/).map(s => s.trim()).filter(Boolean);
+    if (empIds.length === 0) return alert('사번을 입력하세요.');
+    await applyNewAttendees(empIds, bg.querySelector('#manualResult'), bg.querySelector('#manualAddBtn'), '추가 중...', '추가');
+    bg.querySelector('#manualIds').value = '';
+  };
+
+  bg.querySelector('#attUploadBtn').onclick = () => {
+    if (!requireToken()) return;
+    bg.querySelector('#attFile').click();
+  };
+  bg.querySelector('#attFile').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
+    const empIds = rows.map(r => String(r[0] || '').trim()).filter(Boolean);
+    await applyNewAttendees(empIds, bg.querySelector('#uploadResult'), bg.querySelector('#attUploadBtn'), '⏳ 업로드 처리 중...', '📤 참석자 명단 업로드 (사번 목록 엑셀)');
+    e.target.value = '';
   });
 }
 
@@ -610,7 +676,7 @@ async function renderAggregate(content) {
       }
       const p = perPerson.get(key);
       p.count++; p.hours += Number(ev.hours) || 0;
-      p.records.push(`${ev.date} ${ev.start}~${ev.end} (${ev.hours}시간)`);
+      p.records.push(`${ev.date} ${fmtHour(ev.start)}~${fmtHour(ev.end)} (${ev.hours}시간)`);
     });
     const people = Array.from(perPerson.values()).map(p => ({ ...p, pay: Math.round(p.hours * rate) }));
     const groupMap = new Map();
