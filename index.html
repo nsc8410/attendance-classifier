@@ -843,7 +843,7 @@ async function renderUsers(content, preset = null) {
           <thead><tr><th>사번</th><th>이름</th><th>권한</th><th>상태</th><th></th></tr></thead>
           <tbody>${users.map(u => `
             <tr><td>${u.empId}</td><td>${u.name}</td><td>${u.role}</td><td>${u.status}</td>
-            <td><button class="icon danger" data-del="${u.empId}">삭제</button></td></tr>`).join('')}</tbody>
+            <td class="row-flex"><button class="icon ghost" data-edit="${u.empId}">수정</button><button class="icon danger" data-del="${u.empId}">삭제</button></td></tr>`).join('')}</tbody>
         </table>
       </div>
     </div>`;
@@ -858,6 +858,10 @@ async function renderUsers(content, preset = null) {
     renderUsers(content, { users, settings: newSettings });
   };
   document.getElementById('addUserBtn').onclick = () => { if (requireToken()) openAddUserModal(content, users, settings); };
+  content.querySelectorAll('[data-edit]').forEach(el => el.addEventListener('click', () => {
+    if (!requireToken()) return;
+    openEditUserModal(content, users, settings, users.find(u => u.empId === el.dataset.edit));
+  }));
   content.querySelectorAll('[data-del]').forEach(el => el.addEventListener('click', async () => {
     if (!requireToken()) return;
     if (el.dataset.del === session.empId) return alert('본인 계정은 삭제할 수 없습니다.');
@@ -867,6 +871,59 @@ async function renderUsers(content, preset = null) {
     if (!res.ok) return alert('삭제 실패: ' + res.error);
     renderUsers(content, { users: newUsers, settings });
   }));
+}
+
+function openEditUserModal(content, currentUsers, currentSettings, u) {
+  const bg = document.createElement('div');
+  bg.className = 'modal-bg';
+  bg.innerHTML = `
+    <div class="modal">
+      <h3 style="margin-top:0;">사용자 수정</h3>
+      <label>사번</label><input id="eu_id" value="${u.empId}" disabled />
+      <label>이름</label><input id="eu_name" value="${u.name || ''}" />
+      <label>권한</label>
+      <select id="eu_role">
+        <option value="관리자" ${u.role === '관리자' ? 'selected' : ''}>관리자</option>
+        <option value="일반" ${u.role === '일반' ? 'selected' : ''}>일반</option>
+      </select>
+      <label>상태</label>
+      <select id="eu_status">
+        <option value="사용" ${u.status === '사용' ? 'selected' : ''}>사용</option>
+        <option value="중지" ${u.status === '중지' ? 'selected' : ''}>중지</option>
+      </select>
+      <div class="notice"><label style="display:flex; align-items:center; gap:6px; margin:0; font-weight:400;"><input type="checkbox" id="eu_resetpw" style="width:auto;" />비밀번호를 사번으로 초기화</label></div>
+      <div class="actions">
+        <button class="ghost" id="eu_cancel">취소</button>
+        <button class="primary" id="eu_save">저장</button>
+      </div>
+    </div>`;
+  document.body.appendChild(bg);
+  bg.querySelector('#eu_cancel').onclick = () => bg.remove();
+  bg.querySelector('#eu_save').onclick = async () => {
+    if (u.empId === session.empId && bg.querySelector('#eu_status').value === '중지') {
+      return alert('본인 계정은 중지할 수 없습니다.');
+    }
+    if (u.empId === session.empId && bg.querySelector('#eu_role').value !== '관리자') {
+      return alert('본인 계정의 권한은 낮출 수 없습니다.');
+    }
+    const saveBtn = bg.querySelector('#eu_save');
+    saveBtn.disabled = true; saveBtn.textContent = '저장 중...';
+    const newUsers = currentUsers.map(x => {
+      if (x.empId !== u.empId) return x;
+      const updated = {
+        ...x,
+        name: bg.querySelector('#eu_name').value.trim() || x.name,
+        role: bg.querySelector('#eu_role').value,
+        status: bg.querySelector('#eu_status').value
+      };
+      if (bg.querySelector('#eu_resetpw').checked) updated.password = x.empId;
+      return updated;
+    });
+    const res = await commitFiles({ [PATHS.users]: newUsers }, `사용자 수정: ${u.empId}`);
+    if (!res.ok) { saveBtn.disabled = false; saveBtn.textContent = '저장'; return alert('저장 실패: ' + res.error); }
+    bg.remove();
+    renderUsers(content, { users: newUsers, settings: currentSettings });
+  };
 }
 
 function openTokenModal(onDone) {
