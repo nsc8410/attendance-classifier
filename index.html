@@ -216,7 +216,7 @@ async function commitFiles(filesObj, message, retries = 6) {
 
 function requireToken() {
   if (!getToken()) {
-    alert('먼저 사용자 설정 탭에서 GitHub 토큰을 등록해주세요. (쓰기 작업에는 토큰이 필요합니다)');
+    openTokenModal(() => alert('토큰이 등록되었습니다. 하시던 작업을 다시 눌러주세요.'));
     return false;
   }
   return true;
@@ -274,12 +274,18 @@ async function doLogin() {
   enterApp();
 }
 
+function isAdmin() { return !!session && session.role === '관리자'; }
+const ADMIN_ONLY_TABS = ['participation', 'aggregate', 'members', 'users'];
+
 function enterApp() {
   document.getElementById('bootScreen').style.display = 'none';
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('appScreen').style.display = 'block';
   document.getElementById('userName').textContent = session.name;
   document.getElementById('userInfo').textContent = `${session.empId} · ${session.role}`;
+  document.querySelectorAll('.tabbtn').forEach(b => {
+    if (ADMIN_ONLY_TABS.includes(b.dataset.tab) && !isAdmin()) b.style.display = 'none';
+  });
   goTab('events');
 }
 
@@ -303,6 +309,7 @@ const TAB_META = {
 };
 
 function goTab(tab) {
+  if (ADMIN_ONLY_TABS.includes(tab) && !isAdmin()) tab = 'events';
   document.querySelectorAll('.tabbtn').forEach(b => b.classList.toggle('primary', b.dataset.tab === tab));
   document.querySelectorAll('.tabbtn').forEach(b => b.classList.toggle('ghost', b.dataset.tab !== tab));
   document.getElementById('pageTitle').textContent = TAB_META[tab][0];
@@ -340,7 +347,7 @@ async function renderEvents(content, offset = 0, preset = null) {
 
   content.innerHTML = `
     <div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
-      <button class="primary" id="addEventBtn">일정 등록</button>
+      ${isAdmin() ? '<button class="primary" id="addEventBtn">일정 등록</button>' : ''}
     </div>
     <div class="card">
       <div class="row-flex" style="justify-content:space-between; margin-bottom:14px;">
@@ -357,7 +364,7 @@ async function renderEvents(content, offset = 0, preset = null) {
               </div>
               <div class="row-flex">
                 <span class="badge full">참석 ${countMap[ev.id] || 0}명</span>
-                <button class="icon danger" data-del="${ev.id}">삭제</button>
+                ${isAdmin() ? `<button class="icon danger" data-del="${ev.id}">삭제</button>` : ''}
               </div>
             </div>
           </div>`).join('')}
@@ -365,7 +372,7 @@ async function renderEvents(content, offset = 0, preset = null) {
       ${offset + 20 < events.length ? '<div style="text-align:right; margin-top:12px;"><button class="ghost" id="moreBtn">더 보기</button></div>' : ''}
     </div>`;
 
-  document.getElementById('addEventBtn').onclick = () => openAddEventModal(content, events);
+  if (isAdmin()) document.getElementById('addEventBtn').onclick = () => openAddEventModal(content, events);
   content.querySelectorAll('[data-open]').forEach(el => el.addEventListener('click', () => openEventDetail(el.dataset.open, content)));
   content.querySelectorAll('[data-del]').forEach(el => el.addEventListener('click', async () => {
     if (!requireToken()) return;
@@ -454,6 +461,11 @@ async function openEventDetail(id, content) {
   bg.querySelector('#attFile').addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    const uploadBtn = bg.querySelector('#attUploadBtn');
+    const resDivEarly = bg.querySelector('#uploadResult');
+    uploadBtn.disabled = true;
+    uploadBtn.textContent = '⏳ 업로드 처리 중...';
+    resDivEarly.textContent = '';
     const buf = await file.arrayBuffer();
     const wb = XLSX.read(buf, { type: 'array' });
     const ws = wb.Sheets[wb.SheetNames[0]];
@@ -483,11 +495,15 @@ async function openEventDetail(id, content) {
     if (newRecords.length === 0) {
       resDiv.textContent = `추가된 인원 없음 (중복 ${duplicated}건, 미매칭 ${unmatched.length}건)`;
       e.target.value = '';
+      uploadBtn.disabled = false;
+      uploadBtn.textContent = '📤 참석자 명단 업로드 (사번 목록 엑셀)';
       return;
     }
     const updatedAttendance = [...currentAttendance, ...newRecords];
     const res = await commitFiles({ [PATHS.attendance]: updatedAttendance }, `출석자 업로드: ${id} (+${matched}명)`);
     e.target.value = '';
+    uploadBtn.disabled = false;
+    uploadBtn.textContent = '📤 참석자 명단 업로드 (사번 목록 엑셀)';
     if (!res.ok) { resDiv.textContent = '업로드 실패: ' + res.error; return; }
     attendance = updatedAttendance; // 닫기 눌렀을 때 목록에 바로 반영되도록 갱신
     count = attendance.filter(a => a.eventId === id).length;
