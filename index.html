@@ -327,8 +327,10 @@ function computeHours(start, end) {
   return Math.round((diff / 60) * 100) / 100;
 }
 
-async function renderEvents(content, offset = 0) {
-  const [events, attendance, settings] = await Promise.all([
+async function renderEvents(content, offset = 0, preset = null) {
+  // preset: 방금 이 브라우저에서 직접 쓴 데이터가 있으면 그걸 바로 쓰고,
+  // GitHub의 읽기 캐시(raw.githubusercontent.com)가 갱신될 때까지 기다리지 않는다.
+  const [events, attendance, settings] = preset ? [preset.events, preset.attendance, preset.settings] : await Promise.all([
     readJSON(PATHS.events, []), readJSON(PATHS.attendance, []), readJSON(PATHS.settings, { rate: 15000 })
   ]);
   events.sort((a, b) => b.date.localeCompare(a.date) || String(b.id).localeCompare(String(a.id)));
@@ -363,7 +365,7 @@ async function renderEvents(content, offset = 0) {
       ${offset + 20 < events.length ? '<div style="text-align:right; margin-top:12px;"><button class="ghost" id="moreBtn">더 보기</button></div>' : ''}
     </div>`;
 
-  document.getElementById('addEventBtn').onclick = () => openAddEventModal(() => renderEvents(content));
+  document.getElementById('addEventBtn').onclick = () => openAddEventModal(content, events);
   content.querySelectorAll('[data-open]').forEach(el => el.addEventListener('click', () => openEventDetail(el.dataset.open, content)));
   content.querySelectorAll('[data-del]').forEach(el => el.addEventListener('click', async () => {
     if (!requireToken()) return;
@@ -373,17 +375,17 @@ async function renderEvents(content, offset = 0) {
     const newAttendance = attendance.filter(a => a.eventId !== id);
     const res = await commitFiles({ [PATHS.events]: newEvents, [PATHS.attendance]: newAttendance }, `일정 삭제: ${id}`);
     if (!res.ok) return alert('삭제 실패: ' + res.error);
-    renderEvents(content);
+    renderEvents(content, 0, { events: newEvents, attendance: newAttendance, settings });
   }));
   const moreBtn = document.getElementById('moreBtn');
-  if (moreBtn) moreBtn.onclick = () => renderEvents(content, offset + 20);
+  if (moreBtn) moreBtn.onclick = () => renderEvents(content, offset + 20, { events, attendance, settings });
 }
 
 function genId(prefix) {
   return prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
-function openAddEventModal(onDone) {
+function openAddEventModal(content, currentEvents) {
   if (!requireToken()) return;
   const bg = document.createElement('div');
   bg.className = 'modal-bg';
@@ -410,25 +412,33 @@ function openAddEventModal(onDone) {
     const date = bg.querySelector('#e_date').value;
     const start = bg.querySelector('#e_start').value;
     const end = bg.querySelector('#e_end').value;
-    const events = await readJSON(PATHS.events, []);
-    events.push({
+    const saveBtn = bg.querySelector('#e_save');
+    saveBtn.disabled = true; saveBtn.textContent = '저장 중...';
+    const newEvent = {
       id: genId('EV'), name, date, start, end, hours: computeHours(start, end),
       regId: session.empId, regName: session.name, regAt: new Date().toISOString()
-    });
-    const res = await commitFiles({ [PATHS.events]: events }, `일정 등록: ${name}`);
-    if (res.ok) { bg.remove(); onDone(); } else alert('저장 실패: ' + res.error);
+    };
+    const updatedEvents = [...currentEvents, newEvent];
+    const res = await commitFiles({ [PATHS.events]: updatedEvents }, `일정 등록: ${name}`);
+    if (!res.ok) { saveBtn.disabled = false; saveBtn.textContent = '저장'; return alert('저장 실패: ' + res.error); }
+    bg.remove();
+    // 저장 직후에는 GitHub 읽기 캐시가 아직 갱신 안 됐을 수 있으므로,
+    // 방금 저장한 events 배열을 그대로 화면에 반영한다 (attendance/settings만 새로 읽음).
+    const [attendance, settings] = await Promise.all([readJSON(PATHS.attendance, []), readJSON(PATHS.settings, { rate: 15000 })]);
+    renderEvents(content, 0, { events: updatedEvents, attendance, settings });
   };
 }
 
-async function openEventDetail(id) {
+async function openEventDetail(id, content) {
   const bg = document.createElement('div');
   bg.className = 'modal-bg';
   bg.innerHTML = `<div class="modal" style="width:560px;"><div class="empty">불러오는 중...</div></div>`;
   document.body.appendChild(bg);
   const events = await readJSON(PATHS.events, []);
-  const attendance = await readJSON(PATHS.attendance, []);
+  let attendance = await readJSON(PATHS.attendance, []);
+  const settings = await readJSON(PATHS.settings, { rate: 15000 });
   const ev = events.find(x => x.id === id);
-  const count = attendance.filter(a => a.eventId === id).length;
+  let count = attendance.filter(a => a.eventId === id).length;
   bg.querySelector('.modal').innerHTML = `
     <h3 style="margin-top:0;">${ev ? ev.name : ''}</h3>
     <div style="font-size:12.5px; color:#888; margin-bottom:12px;">${ev ? `${ev.date} · ${ev.start}~${ev.end} · ${ev.hours}시간 · 참석 ${count}명` : ''}</div>
@@ -436,7 +446,7 @@ async function openEventDetail(id) {
     <button class="ghost" id="attUploadBtn">📤 참석자 명단 업로드 (사번 목록 엑셀)</button>
     <div id="uploadResult" style="font-size:12.5px; margin-top:8px;"></div>
     <div class="actions"><button class="ghost" id="e_close" style="flex:1;">닫기</button></div>`;
-  bg.querySelector('#e_close').onclick = () => { bg.remove(); goTab('events'); };
+  bg.querySelector('#e_close').onclick = () => { bg.remove(); renderEvents(content, 0, { events, attendance, settings }); };
   bg.querySelector('#attUploadBtn').onclick = () => {
     if (!requireToken()) return;
     bg.querySelector('#attFile').click();
@@ -452,7 +462,7 @@ async function openEventDetail(id) {
 
     const members = await readJSON(PATHS.members, []);
     const memberMap = new Map(members.map(m => [String(m.empId).trim().toUpperCase(), m]));
-    const currentAttendance = await readJSON(PATHS.attendance, []);
+    const currentAttendance = attendance; // 모달을 연 시점의 최신 데이터를 그대로 사용
     const existingSet = new Set(currentAttendance.filter(a => a.eventId === id).map(a => String(a.empId).trim().toUpperCase()));
 
     let matched = 0, duplicated = 0;
@@ -475,9 +485,12 @@ async function openEventDetail(id) {
       e.target.value = '';
       return;
     }
-    const res = await commitFiles({ [PATHS.attendance]: [...currentAttendance, ...newRecords] }, `출석자 업로드: ${id} (+${matched}명)`);
+    const updatedAttendance = [...currentAttendance, ...newRecords];
+    const res = await commitFiles({ [PATHS.attendance]: updatedAttendance }, `출석자 업로드: ${id} (+${matched}명)`);
     e.target.value = '';
     if (!res.ok) { resDiv.textContent = '업로드 실패: ' + res.error; return; }
+    attendance = updatedAttendance; // 닫기 눌렀을 때 목록에 바로 반영되도록 갱신
+    count = attendance.filter(a => a.eventId === id).length;
     resDiv.innerHTML = `매칭 ${matched}명 등록${duplicated ? `, 중복 ${duplicated}건 제외` : ''}${unmatched.length ? `, 명단에 없는 사번 ${unmatched.length}건: ${unmatched.join(', ')}` : ''}`;
   });
 }
@@ -626,7 +639,7 @@ function exportAggregateExcel(data) {
 // ============================================================
 // 조합원 명단
 // ============================================================
-async function renderMembers(content, offset = 0, q = '') {
+async function renderMembers(content, offset = 0, q = '', presetAll = null) {
   content.innerHTML = `
     <div class="card">
       <div class="row-flex" style="justify-content:space-between; margin-bottom:6px;">
@@ -643,9 +656,9 @@ async function renderMembers(content, offset = 0, q = '') {
   document.getElementById('mSearchBtn').onclick = () => renderMembers(content, 0, document.getElementById('mq').value.trim());
   document.getElementById('mq').addEventListener('keydown', e => { if (e.key === 'Enter') renderMembers(content, 0, e.target.value.trim()); });
   document.getElementById('replaceBtn').onclick = () => { if (requireToken()) document.getElementById('replaceFile').click(); };
-  document.getElementById('replaceFile').addEventListener('change', (e) => handleReplaceMembers(e, () => renderMembers(content)));
+  document.getElementById('replaceFile').addEventListener('change', (e) => handleReplaceMembers(content, e));
 
-  const all = await readJSON(PATHS.members, []);
+  const all = presetAll || await readJSON(PATHS.members, []);
   let results = all;
   if (q) {
     results = /^[0-9A-Za-z]+$/.test(q)
@@ -672,7 +685,7 @@ async function renderMembers(content, offset = 0, q = '') {
     ${offset + 50 < total ? '<div style="text-align:right; margin-top:10px;"><button class="ghost" id="mMoreBtn">더 보기</button></div>' : ''}`;
   wrap.querySelectorAll('[data-edit]').forEach(el => el.addEventListener('click', () => {
     if (!requireToken()) return;
-    openMemberModal(page.find(m => m.empId === el.dataset.edit), () => renderMembers(content, offset, q));
+    openMemberModal(page.find(m => m.empId === el.dataset.edit), all, content, offset, q);
   }));
   wrap.querySelectorAll('[data-del]').forEach(el => el.addEventListener('click', async () => {
     if (!requireToken()) return;
@@ -680,13 +693,13 @@ async function renderMembers(content, offset = 0, q = '') {
     const newList = all.filter(m => String(m.empId).trim().toUpperCase() !== el.dataset.del.toUpperCase());
     const res = await commitFiles({ [PATHS.members]: newList }, `조합원 삭제: ${el.dataset.del}`);
     if (!res.ok) return alert('삭제 실패: ' + res.error);
-    renderMembers(content, offset, q);
+    renderMembers(content, offset, q, newList);
   }));
   const moreBtn = document.getElementById('mMoreBtn');
-  if (moreBtn) moreBtn.onclick = () => renderMembers(content, offset + 50, q);
+  if (moreBtn) moreBtn.onclick = () => renderMembers(content, offset + 50, q, all);
 }
 
-function openMemberModal(m, onDone) {
+function openMemberModal(m, currentAll, content, offset, q) {
   const bg = document.createElement('div');
   bg.className = 'modal-bg';
   bg.innerHTML = `
@@ -709,7 +722,9 @@ function openMemberModal(m, onDone) {
   document.body.appendChild(bg);
   bg.querySelector('#mm_cancel').onclick = () => bg.remove();
   bg.querySelector('#mm_save').onclick = async () => {
-    const all = await readJSON(PATHS.members, []);
+    const saveBtn = bg.querySelector('#mm_save');
+    saveBtn.disabled = true; saveBtn.textContent = '저장 중...';
+    const all = [...currentAll];
     const idx = all.findIndex(x => String(x.empId).trim().toUpperCase() === String(m.empId).trim().toUpperCase());
     const updated = {
       group: bg.querySelector('#mm_group').value, empId: m.empId, name: bg.querySelector('#mm_name').value,
@@ -718,12 +733,13 @@ function openMemberModal(m, onDone) {
     };
     if (idx >= 0) all[idx] = updated; else all.push(updated);
     const res = await commitFiles({ [PATHS.members]: all }, `조합원 정보 수정: ${m.empId}`);
-    if (!res.ok) return alert('저장 실패: ' + res.error);
-    bg.remove(); onDone();
+    if (!res.ok) { saveBtn.disabled = false; saveBtn.textContent = '저장'; return alert('저장 실패: ' + res.error); }
+    bg.remove();
+    renderMembers(content, offset, q, all);
   };
 }
 
-async function handleReplaceMembers(e, onDone) {
+async function handleReplaceMembers(content, e) {
   const file = e.target.files[0];
   if (!file) return;
   if (!confirm('현재 조합원 명단 전체를 이 파일 내용으로 교체합니다. 계속할까요?')) { e.target.value = ''; return; }
@@ -748,15 +764,15 @@ async function handleReplaceMembers(e, onDone) {
   }
   const res = await commitFiles({ [PATHS.members]: rows }, `조합원 명단 교체 (${rows.length}명)`);
   e.target.value = '';
-  if (res.ok) { alert(`${rows.length.toLocaleString()}명으로 교체 완료`); onDone(); }
+  if (res.ok) { alert(`${rows.length.toLocaleString()}명으로 교체 완료`); renderMembers(content, 0, '', rows); }
   else alert('교체 실패: ' + res.error);
 }
 
 // ============================================================
 // 사용자 설정 (+ GitHub 연결)
 // ============================================================
-async function renderUsers(content) {
-  const [users, settings] = await Promise.all([readJSON(PATHS.users, []), readJSON(PATHS.settings, { rate: 15000 })]);
+async function renderUsers(content, preset = null) {
+  const [users, settings] = preset ? [preset.users, preset.settings] : await Promise.all([readJSON(PATHS.users, []), readJSON(PATHS.settings, { rate: 15000 })]);
   const hasToken = !!getToken();
   content.innerHTML = `
     <div class="card">
@@ -792,13 +808,16 @@ async function renderUsers(content) {
       </div>
     </div>`;
 
-  document.getElementById('tokenBtn').onclick = () => openTokenModal(() => renderUsers(content));
+  document.getElementById('tokenBtn').onclick = () => openTokenModal(() => renderUsers(content, { users, settings }));
   document.getElementById('rateSaveBtn').onclick = async () => {
     if (!requireToken()) return;
-    const res = await commitFiles({ [PATHS.settings]: { rate: Number(document.getElementById('rateInput').value) } }, '시간당 지급액 변경');
-    if (res.ok) alert('저장되었습니다.'); else alert('저장 실패: ' + res.error);
+    const newSettings = { rate: Number(document.getElementById('rateInput').value) };
+    const res = await commitFiles({ [PATHS.settings]: newSettings }, '시간당 지급액 변경');
+    if (!res.ok) return alert('저장 실패: ' + res.error);
+    alert('저장되었습니다.');
+    renderUsers(content, { users, settings: newSettings });
   };
-  document.getElementById('addUserBtn').onclick = () => { if (requireToken()) openAddUserModal(() => renderUsers(content)); };
+  document.getElementById('addUserBtn').onclick = () => { if (requireToken()) openAddUserModal(content, users, settings); };
   content.querySelectorAll('[data-del]').forEach(el => el.addEventListener('click', async () => {
     if (!requireToken()) return;
     if (el.dataset.del === session.empId) return alert('본인 계정은 삭제할 수 없습니다.');
@@ -806,7 +825,7 @@ async function renderUsers(content) {
     const newUsers = users.filter(u => u.empId !== el.dataset.del);
     const res = await commitFiles({ [PATHS.users]: newUsers }, `사용자 삭제: ${el.dataset.del}`);
     if (!res.ok) return alert('삭제 실패: ' + res.error);
-    renderUsers(content);
+    renderUsers(content, { users: newUsers, settings });
   }));
 }
 
@@ -833,7 +852,7 @@ function openTokenModal(onDone) {
   };
 }
 
-function openAddUserModal(onDone) {
+function openAddUserModal(content, currentUsers, currentSettings) {
   const bg = document.createElement('div');
   bg.className = 'modal-bg';
   bg.innerHTML = `
@@ -854,12 +873,14 @@ function openAddUserModal(onDone) {
     const empId = bg.querySelector('#u_id').value.trim();
     const name = bg.querySelector('#u_name').value.trim();
     if (!empId || !name) return alert('사번과 이름을 입력하세요.');
-    const users = await readJSON(PATHS.users, []);
-    if (users.some(u => u.empId === empId)) return alert('이미 등록된 사번입니다.');
-    users.push({ empId, name, password: empId, role: bg.querySelector('#u_role').value, status: '사용' });
-    const res = await commitFiles({ [PATHS.users]: users }, `사용자 추가: ${empId}`);
-    if (!res.ok) return alert('저장 실패: ' + res.error);
-    bg.remove(); onDone();
+    if (currentUsers.some(u => u.empId === empId)) return alert('이미 등록된 사번입니다.');
+    const saveBtn = bg.querySelector('#u_save');
+    saveBtn.disabled = true; saveBtn.textContent = '저장 중...';
+    const newUsers = [...currentUsers, { empId, name, password: empId, role: bg.querySelector('#u_role').value, status: '사용' }];
+    const res = await commitFiles({ [PATHS.users]: newUsers }, `사용자 추가: ${empId}`);
+    if (!res.ok) { saveBtn.disabled = false; saveBtn.textContent = '저장'; return alert('저장 실패: ' + res.error); }
+    bg.remove();
+    renderUsers(content, { users: newUsers, settings: currentSettings });
   };
 }
 </script>
