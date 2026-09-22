@@ -749,6 +749,11 @@ async function renderAggregate(content) {
 }
 
 function dotDate(s) { return String(s || '').replace(/-/g, '.'); }
+// "2026-09-16" + 4시간 -> "9월 16일 4시간" (연도 생략, 시간대 대신 총 시간만)
+function simpleRecordStr(r) {
+  const [, mo, da] = r.date.split('-');
+  return `${Number(mo)}월 ${Number(da)}일 ${r.hours}시간`;
+}
 
 // "1지단","2지단"... 처럼 앞에 숫자가 있으면 숫자 순으로, 없는 그룹(엔진분과, 해양분과 등)은 그 뒤에 가나다순으로.
 function groupSortKey(name) {
@@ -810,7 +815,7 @@ async function exportAggregateExcel(data, payDate) {
   sortedPeople.forEach(p => ws1.addRow({
     group: p.group, empId: p.empId, name: p.name, dept: p.dept, count: p.count, hours: p.hours,
     rate: data.rate, pay: p.pay,
-    records: p.records.map(r => `${dotDate(r.date)} ${fmtHour(r.start)}~${fmtHour(r.end)} (${r.hours}시간)`).join(', '),
+    records: p.records.map(r => simpleRecordStr(r)).join(', '),
     phone: p.phone, bank: p.bank, account: p.account, holder: p.holder
   }));
   styleHeaderRow(ws1.getRow(1));
@@ -843,10 +848,7 @@ async function exportAggregateExcel(data, payDate) {
   const ws3HeaderRowNum = 2;
   ws3.getRow(ws3HeaderRowNum).values = ['휴대전화번호', '성함', '파업참여 날짜,시간', '파업참여 시간', '집행비용', '은행', '계좌번호', '지급 일자'];
   sortedPeople.forEach(p => {
-    const dateTimeStr = p.records.map(r => {
-      const [, mo, da] = r.date.split('-');
-      return `${Number(mo)}월 ${Number(da)}일 ${r.hours}시간`;
-    }).join(', ');
+    const dateTimeStr = p.records.map(r => simpleRecordStr(r)).join(', ');
     ws3.addRow([p.phone, p.name, dateTimeStr, `총 ${p.hours}시간`, `${p.pay.toLocaleString()}원`, p.bank, p.account, payDateLabel]);
   });
   styleHeaderRow(ws3.getRow(ws3HeaderRowNum));
