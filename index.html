@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>현대중공업지부 참석확인서 집계</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <style>
   * { box-sizing: border-box; }
   body { font-family:-apple-system,'Malgun Gothic',sans-serif; margin:0; background:#eef1f6; color:#1a1a1a; }
@@ -699,9 +700,13 @@ async function renderAggregate(content) {
       }
       const p = perPerson.get(key);
       p.count++; p.hours += Number(ev.hours) || 0;
-      p.records.push(`${ev.date} ${fmtHour(ev.start)}~${fmtHour(ev.end)} (${ev.hours}시간)`);
+      p.records.push({ date: ev.date, start: ev.start, end: ev.end, hours: ev.hours });
     });
-    const people = Array.from(perPerson.values()).map(p => ({ ...p, pay: Math.round(p.hours * rate) }));
+    const people = Array.from(perPerson.values()).map(p => ({
+      ...p,
+      pay: Math.round(p.hours * rate),
+      records: [...p.records].sort((a, b) => a.date.localeCompare(b.date) || a.start - b.start)
+    }));
     const groupMap = new Map();
     people.forEach(p => {
       const g = p.group || '미지정';
@@ -732,53 +737,131 @@ async function renderAggregate(content) {
       </div>`;
   };
   document.getElementById('agExportBtn').onclick = async () => {
+    const btn = document.getElementById('agExportBtn');
     const dateFrom = document.getElementById('agFrom').value;
     const dateTo = document.getElementById('agTo').value;
     const payDate = document.getElementById('agPayDate').value;
     const data = lastData && lastData.dateFrom === dateFrom && lastData.dateTo === dateTo ? lastData : await runAggregate(dateFrom, dateTo);
-    exportAggregateExcel(data, payDate);
+    btn.disabled = true; btn.textContent = '⏳ 파일 만드는 중...';
+    await exportAggregateExcel(data, payDate);
+    btn.disabled = false; btn.textContent = '전체 집계 엑셀 출력';
   };
 }
 
 function dotDate(s) { return String(s || '').replace(/-/g, '.'); }
 
-function exportAggregateExcel(data, payDate) {
-  const wb = XLSX.utils.book_new();
+// "1지단","2지단"... 처럼 앞에 숫자가 있으면 숫자 순으로, 없는 그룹(엔진분과, 해양분과 등)은 그 뒤에 가나다순으로.
+function groupSortKey(name) {
+  const m = String(name || '').match(/^(\d+)/);
+  return m ? [0, Number(m[1]), name] : [1, 0, name];
+}
+function compareGroup(a, b) {
+  const ka = groupSortKey(a), kb = groupSortKey(b);
+  if (ka[0] !== kb[0]) return ka[0] - kb[0];
+  if (ka[1] !== kb[1]) return ka[1] - kb[1];
+  return String(ka[2]).localeCompare(String(kb[2]), 'ko');
+}
+
+const HEADER_FILL = 'FF2F4F8F';
+const HEADER_FONT_COLOR = 'FFFFFFFF';
+
+function styleHeaderRow(row) {
+  row.eachCell(cell => {
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: HEADER_FILL } };
+    cell.font = { bold: true, color: { argb: HEADER_FONT_COLOR } };
+    cell.alignment = { vertical: 'middle', horizontal: 'center' };
+  });
+}
+
+function styleTitleRow(row) {
+  row.font = { bold: true, size: 13 };
+}
+
+// 데이터 내용 길이에 맞춰 열 너비를 자동으로 넉넉하게 잡아 글자가 안 잘리게 한다.
+function autoFitColumns(ws, headerRowNumber) {
+  ws.columns.forEach(col => {
+    let maxLen = 8;
+    col.eachCell({ includeEmpty: false }, cell => {
+      const v = cell.value == null ? '' : String(cell.value);
+      // 한글은 폭이 넓으므로 대략 1.7배로 가중치를 둔다.
+      let w = 0;
+      for (const ch of v) w += /[가-힣]/.test(ch) ? 1.7 : 1;
+      if (w > maxLen) maxLen = w;
+    });
+    col.width = Math.min(Math.ceil(maxLen) + 3, 60);
+  });
+}
+
+async function exportAggregateExcel(data, payDate) {
+  const wb = new ExcelJS.Workbook();
   const payDateLabel = payDate ? dotDate(payDate) : '';
+  const sortedPeople = [...data.people].sort((a, b) => compareGroup(a.group, b.group) || String(a.empId).localeCompare(String(b.empId)));
+  const sortedGroups = [...data.groups].sort((a, b) => compareGroup(a.group, b.group));
 
-  const personRows = data.people.map(p => ({
-    '지단/지회': p.group, 사번: p.empId, 성명: p.name, 소속: p.dept, 참여일수: p.count,
-    '총 참여시간': p.hours, '시간당 지급액': data.rate, '총 지급액': p.pay,
-    '참여일자 및 시간': p.records.join(', '), 휴대전화번호: p.phone, 은행: p.bank, 계좌번호: p.account, 예금주: p.holder
+  // ---------- 1) 기간별 개인 집계 ----------
+  const ws1 = wb.addWorksheet('기간별 개인 집계');
+  ws1.columns = [
+    { header: '지단/지회', key: 'group' }, { header: '사번', key: 'empId' }, { header: '성명', key: 'name' },
+    { header: '소속', key: 'dept' }, { header: '참여일수', key: 'count' }, { header: '총 참여시간', key: 'hours' },
+    { header: '시간당 지급액', key: 'rate' }, { header: '총 지급액', key: 'pay' },
+    { header: '참여일자 및 시간', key: 'records' }, { header: '휴대전화번호', key: 'phone' },
+    { header: '은행', key: 'bank' }, { header: '계좌번호', key: 'account' }, { header: '예금주', key: 'holder' }
+  ];
+  sortedPeople.forEach(p => ws1.addRow({
+    group: p.group, empId: p.empId, name: p.name, dept: p.dept, count: p.count, hours: p.hours,
+    rate: data.rate, pay: p.pay,
+    records: p.records.map(r => `${dotDate(r.date)} ${fmtHour(r.start)}~${fmtHour(r.end)} (${r.hours}시간)`).join(', '),
+    phone: p.phone, bank: p.bank, account: p.account, holder: p.holder
   }));
-  const ws1 = XLSX.utils.json_to_sheet(personRows, { origin: 'A4' });
-  XLSX.utils.sheet_add_aoa(ws1, [
-    ['기간 전체 참석 집계'],
-    [`${dotDate(data.dateFrom)} ~ ${dotDate(data.dateTo)} · 일정 ${data.eventCount}건 · 참여 ${data.peopleCount}명 · 총 ${data.totalHours}시간 · 시간당 ${data.rate.toLocaleString()}원`]
-  ], { origin: 'A1' });
-  XLSX.utils.book_append_sheet(wb, ws1, '기간별 개인 집계');
+  styleHeaderRow(ws1.getRow(1));
+  ws1.autoFilter = { from: 'A1', to: { row: 1, column: ws1.columns.length } };
+  ws1.getColumn('records').alignment = { wrapText: true, vertical: 'top' };
+  autoFitColumns(ws1);
+  ws1.views = [{ state: 'frozen', ySplit: 1 }];
 
-  const groupRows = data.groups.map(g => ({
-    구분: g.group, '참여 인원': g.peopleCount, '참여 건수': g.recordCount,
-    '총 참여시간': g.hours, '시간당 지급액': data.rate, '총 지급액': g.pay
-  }));
-  const ws2 = XLSX.utils.json_to_sheet(groupRows, { origin: 'A4' });
-  XLSX.utils.sheet_add_aoa(ws2, [
-    ['기간별 지단·지회 집계'],
-    [`${dotDate(data.dateFrom)} ~ ${dotDate(data.dateTo)}`]
-  ], { origin: 'A1' });
-  XLSX.utils.book_append_sheet(wb, ws2, '기간별 지단 집계');
+  // ---------- 2) 기간별 지단 집계 ----------
+  const ws2 = wb.addWorksheet('기간별 지단 집계');
+  ws2.addRow(['기간별 지단·지회 집계']);
+  ws2.addRow([`${dotDate(data.dateFrom)} ~ ${dotDate(data.dateTo)}`]);
+  ws2.addRow([]);
+  styleTitleRow(ws2.getRow(1));
+  const ws2HeaderRowNum = 4;
+  ws2.getRow(ws2HeaderRowNum).values = ['구분', '참여 인원', '참여 건수', '총 참여시간', '시간당 지급액', '총 지급액'];
+  sortedGroups.forEach(g => ws2.addRow([g.group, g.peopleCount, g.recordCount, g.hours, data.rate, g.pay]));
+  styleHeaderRow(ws2.getRow(ws2HeaderRowNum));
+  ws2.autoFilter = { from: { row: ws2HeaderRowNum, column: 1 }, to: { row: ws2HeaderRowNum, column: 6 } };
+  autoFitColumns(ws2);
+  ws2.views = [{ state: 'frozen', ySplit: ws2HeaderRowNum }];
 
-  const smsRows = data.people.map(p => ({
-    휴대전화번호: p.phone, 성함: p.name,
-    '파업참여 날짜,시간': p.records.map(r => r.replace(/\s\(\d+(\.\d+)?시간\)$/, '')).join(', '),
-    '파업참여 시간': `총 ${p.hours}시간`,
-    집행비용: `${p.pay.toLocaleString()}원`,
-    은행: p.bank, 계좌번호: p.account, '지급 일자': payDateLabel
-  }));
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(smsRows), '문자발송용');
+  // ---------- 3) 문자발송용 ----------
+  const ws3 = wb.addWorksheet('문자발송용');
+  const years = new Set();
+  sortedPeople.forEach(p => p.records.forEach(r => years.add(r.date.slice(0, 4))));
+  const yearLabel = years.size === 1 ? `${[...years][0]}년` : [...years].sort().map(y => y + '년').join('/');
+  ws3.addRow([`※ 아래 날짜는 모두 ${yearLabel} 기준입니다.`]);
+  styleTitleRow(ws3.getRow(1));
+  const ws3HeaderRowNum = 2;
+  ws3.getRow(ws3HeaderRowNum).values = ['휴대전화번호', '성함', '파업참여 날짜,시간', '파업참여 시간', '집행비용', '은행', '계좌번호', '지급 일자'];
+  sortedPeople.forEach(p => {
+    const dateTimeStr = p.records.map(r => {
+      const [, mo, da] = r.date.split('-');
+      return `${Number(mo)}월 ${Number(da)}일 ${r.hours}시간`;
+    }).join(', ');
+    ws3.addRow([p.phone, p.name, dateTimeStr, `총 ${p.hours}시간`, `${p.pay.toLocaleString()}원`, p.bank, p.account, payDateLabel]);
+  });
+  styleHeaderRow(ws3.getRow(ws3HeaderRowNum));
+  ws3.autoFilter = { from: { row: ws3HeaderRowNum, column: 1 }, to: { row: ws3HeaderRowNum, column: 8 } };
+  ws3.getColumn(3).alignment = { wrapText: true, vertical: 'top' };
+  autoFitColumns(ws3);
+  ws3.views = [{ state: 'frozen', ySplit: ws3HeaderRowNum }];
 
-  XLSX.writeFile(wb, `${data.dateFrom}_${data.dateTo}_전체집계.xlsx`);
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const filename = `${data.dateFrom}_${data.dateTo}_전체집계.xlsx`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 // ============================================================
