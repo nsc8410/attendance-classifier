@@ -741,8 +741,10 @@ async function renderAggregate(content) {
     const dateFrom = document.getElementById('agFrom').value;
     const dateTo = document.getElementById('agTo').value;
     const payDate = document.getElementById('agPayDate').value;
-    const data = lastData && lastData.dateFrom === dateFrom && lastData.dateTo === dateTo ? lastData : await runAggregate(dateFrom, dateTo);
     btn.disabled = true; btn.textContent = '⏳ 파일 만드는 중...';
+    // 조회 시점에 캐시해둔 데이터를 재사용하지 않고, 출력 직전에 항상 다시 받아온다.
+    // (다른 사람이 방금 계좌정보 등을 수정했을 수 있으므로)
+    const data = await runAggregate(dateFrom, dateTo);
     await exportAggregateExcel(data, payDate);
     btn.disabled = false; btn.textContent = '전체 집계 엑셀 출력';
   };
@@ -752,7 +754,7 @@ function dotDate(s) { return String(s || '').replace(/-/g, '.'); }
 // "2026-09-16" + 4시간 -> "9월 16일 4시간" (연도 생략, 시간대 대신 총 시간만)
 function simpleRecordStr(r) {
   const [, mo, da] = r.date.split('-');
-  return `${Number(mo)}월 ${Number(da)}일 ${r.hours}시간`;
+  return `${Number(mo)}월 ${Number(da)}일 ${r.hours}H`;
 }
 
 // "1지단","2지단"... 처럼 앞에 숫자가 있으면 숫자 순으로, 없는 그룹(엔진분과, 해양분과 등)은 그 뒤에 가나다순으로.
@@ -810,13 +812,13 @@ async function exportAggregateExcel(data, payDate) {
     { header: '소속', key: 'dept' }, { header: '참여일수', key: 'count' }, { header: '총 참여시간', key: 'hours' },
     { header: '시간당 지급액', key: 'rate' }, { header: '총 지급액', key: 'pay' },
     { header: '참여일자 및 시간', key: 'records' }, { header: '휴대전화번호', key: 'phone' },
-    { header: '은행', key: 'bank' }, { header: '계좌번호', key: 'account' }, { header: '예금주', key: 'holder' }
+    { header: '은행', key: 'bank' }, { header: '계좌번호', key: 'account' }
   ];
   sortedPeople.forEach(p => ws1.addRow({
     group: p.group, empId: p.empId, name: p.name, dept: p.dept, count: p.count, hours: p.hours,
     rate: data.rate, pay: p.pay,
     records: p.records.map(r => simpleRecordStr(r)).join(', '),
-    phone: p.phone, bank: p.bank, account: p.account, holder: p.holder
+    phone: p.phone, bank: p.bank, account: p.account
   }));
   styleHeaderRow(ws1.getRow(1));
   ws1.autoFilter = { from: 'A1', to: { row: 1, column: ws1.columns.length } };
@@ -840,12 +842,7 @@ async function exportAggregateExcel(data, payDate) {
 
   // ---------- 3) 문자발송용 ----------
   const ws3 = wb.addWorksheet('문자발송용');
-  const years = new Set();
-  sortedPeople.forEach(p => p.records.forEach(r => years.add(r.date.slice(0, 4))));
-  const yearLabel = years.size === 1 ? `${[...years][0]}년` : [...years].sort().map(y => y + '년').join('/');
-  ws3.addRow([`※ 아래 날짜는 모두 ${yearLabel} 기준입니다.`]);
-  styleTitleRow(ws3.getRow(1));
-  const ws3HeaderRowNum = 2;
+  const ws3HeaderRowNum = 1;
   ws3.getRow(ws3HeaderRowNum).values = ['휴대전화번호', '성함', '파업참여 날짜,시간', '파업참여 시간', '집행비용', '은행', '계좌번호', '지급 일자'];
   sortedPeople.forEach(p => {
     const dateTimeStr = p.records.map(r => simpleRecordStr(r)).join(', ');
