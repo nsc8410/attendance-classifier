@@ -754,7 +754,7 @@ function dotDate(s) { return String(s || '').replace(/-/g, '.'); }
 // "2026-09-16" + 4시간 -> "9월 16일 4시간" (연도 생략, 시간대 대신 총 시간만)
 function simpleRecordStr(r) {
   const [, mo, da] = r.date.split('-');
-  return `${Number(mo)}월 ${Number(da)}일 ${r.hours}H`;
+  return `${Number(mo)}월 ${Number(da)}일 - ${r.hours}H`;
 }
 
 // "1지단","2지단"... 처럼 앞에 숫자가 있으면 숫자 순으로, 없는 그룹(엔진분과, 해양분과 등)은 그 뒤에 가나다순으로.
@@ -912,11 +912,19 @@ async function renderMembers(content, offset = 0, q = '', presetAll = null) {
         const status = has1 && has2 ? '<span class="badge full">등록완료</span>' : (has1 || has2) ? '<span class="badge part">일부 등록</span>' : '<span class="badge none">미등록</span>';
         return `<tr>
           <td>${m.group || ''}</td><td>${m.empId}</td><td>${m.name}</td><td>${m.dept || ''}</td><td>${status}</td>
-          <td class="row-flex"><button class="icon ghost" data-edit="${m.empId}">정보수정</button><button class="icon danger" data-del="${m.empId}">삭제</button></td>
+          <td class="row-flex">
+            <button class="icon ghost" data-history="${m.empId}">출석내역</button>
+            <button class="icon ghost" data-edit="${m.empId}">정보수정</button>
+            <button class="icon danger" data-del="${m.empId}">삭제</button>
+          </td>
         </tr>`;
       }).join('')}</tbody>
     </table>
     ${offset + 50 < total ? '<div style="text-align:right; margin-top:10px;"><button class="ghost" id="mMoreBtn">더 보기</button></div>' : ''}`;
+  wrap.querySelectorAll('[data-history]').forEach(el => el.addEventListener('click', () => {
+    const m = page.find(x => x.empId === el.dataset.history);
+    openMemberHistoryModal(m.empId, m.name);
+  }));
   wrap.querySelectorAll('[data-edit]').forEach(el => el.addEventListener('click', () => {
     if (!requireToken()) return;
     openMemberModal(page.find(m => m.empId === el.dataset.edit), all, content, offset, q);
@@ -931,6 +939,38 @@ async function renderMembers(content, offset = 0, q = '', presetAll = null) {
   }));
   const moreBtn = document.getElementById('mMoreBtn');
   if (moreBtn) moreBtn.onclick = () => renderMembers(content, offset + 50, q, all);
+}
+
+async function openMemberHistoryModal(empId, name) {
+  const bg = document.createElement('div');
+  bg.className = 'modal-bg';
+  bg.innerHTML = `<div class="modal" style="width:520px;"><div class="empty">불러오는 중...</div></div>`;
+  document.body.appendChild(bg);
+
+  const [events, attendance] = await Promise.all([readJSON(PATHS.events, []), readJSON(PATHS.attendance, [])]);
+  const eventMap = new Map(events.map(e => [e.id, e]));
+  const key = String(empId).trim().toUpperCase();
+  const myRecords = attendance
+    .filter(a => String(a.empId).trim().toUpperCase() === key)
+    .map(a => eventMap.get(a.eventId))
+    .filter(Boolean)
+    .sort((a, b) => b.date.localeCompare(a.date) || (b.start - a.start));
+
+  const totalHours = myRecords.reduce((s, e) => s + (Number(e.hours) || 0), 0);
+
+  bg.querySelector('.modal').innerHTML = `
+    <h3 style="margin-top:0;">${name} (${empId}) 출석내역</h3>
+    <div style="font-size:12.5px; color:#888; margin-bottom:12px;">전체 등록 일정 ${events.length}건 중 참석 ${myRecords.length}건 · 총 ${totalHours}시간</div>
+    <div style="max-height:360px; overflow-y:auto; border:1px solid #edf0f4; border-radius:8px;">
+      ${myRecords.length === 0 ? '<div class="empty">참석한 일정이 없습니다.</div>' : `
+      <table>
+        <thead><tr><th>날짜</th><th>행사명</th><th>시간</th></tr></thead>
+        <tbody>${myRecords.map(e => `
+          <tr><td>${e.date}</td><td>${e.name}</td><td>${fmtHour(e.start)}~${fmtHour(e.end)} (${e.hours}시간)</td></tr>`).join('')}</tbody>
+      </table>`}
+    </div>
+    <div class="actions"><button class="ghost" id="mh_close" style="flex:1;">닫기</button></div>`;
+  bg.querySelector('#mh_close').onclick = () => bg.remove();
 }
 
 function openMemberModal(m, currentAll, content, offset, q) {
